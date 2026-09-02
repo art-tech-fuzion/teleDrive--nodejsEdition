@@ -9,25 +9,14 @@ on:
 
 jobs:
   deploy:
-    name: FTP Deploy
+    name: Fast FTP Deploy
     runs-on: ubuntu-latest
 
     steps:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-
-      - name: 📦 Install Latest Node Modules in dist/
-        run: |
-          cd dist
-          npm install --omit=dev --no-audit --no-fund
-          cd ..
-
-      - name: 🚀 Deploy dist/ Content to Server via FTP
+      - name: 🚀 Deploy dist/ Code to Server via FTP (Lightning Fast)
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -38,4 +27,7 @@ jobs:
           exclude: |
             **/.git*
             **/.git*/**
+            **/node_modules/**
+            node_modules/
             .env
+            temp_chunks/*
