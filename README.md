@@ -309,7 +309,7 @@ TeleDrive provides a RESTful API and action dispatcher (`/api` and backward-comp
 
 - **Creator & Lead Developer**: **Rahul Kumar**
 - **Organization / Brand**: **Art-Tech Fuzion**
-- **Project Repository**: [TeleDrive-nodejs](https://github.com/rahulkumar/TeleDrive-nodejs)
+- **Project Repository**: [TeleDrive-nodejs](https://github.com/ART-TECH-FUZION/TeleDrive-nodejs)
 
 ---
 
