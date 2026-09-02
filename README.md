@@ -188,34 +188,93 @@ Your personal Telegram Cloud Drive is live and ready!
 
 ## 🚀 Production Deployment Guide
 
-### Automated GitHub Actions FTP Deployment
+### 1. Automated GitHub Actions FTP Deployment (Fast 5-Second Deployments)
 
-This repository includes a pre-configured CI/CD workflow ([`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml)) that automatically deploys changes to your server via FTP whenever you push to `main` or `master`.
+This repository includes an optimized CI/CD workflow ([`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml)) that deploys your production code to your server via FTP on every push.
 
+> ⚡ **Why Deployments Take Only 5 Seconds**: `node_modules` (6,500+ files) is excluded from FTP transfers. FTP only uploads your clean code files (`server.js`, `src/`, `assets/`, `templates/`, `package.json`), taking under 5 seconds.
+
+#### Setting Up GitHub Secrets:
 1. In your GitHub repository, go to **Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions**.
-2. Add the following **Repository Secrets**:
-   - `FTP_SERVER`: Your server's FTP hostname or IP address (e.g. `ftp.yourdomain.com`).
+2. Click **New repository secret** and add:
+   - `FTP_SERVER`: Your server's FTP hostname or IP (e.g. `ftp.yourdomain.com` or `123.45.67.89`).
    - `FTP_USERNAME`: Your FTP account username.
    - `FTP_PASSWORD`: Your FTP account password.
-3. Every `git push origin main` will automatically:
-   - Install production dependencies in your `dist/` directory.
-   - Upload the production code to your server via FTP.
-   - Preserve your live `.env` file on the server.
 
 ---
 
-### Panel Configuration (cPanel / mPanel / Hostinger / Cloudways)
+### 2. Server SSH Setup & One-Time Dependency Installation
+
+Follow these quick steps to set up your domain directory and install `node_modules` directly on your server:
+
+#### Step A: Connect to Your Server via SSH
+Open your terminal on your computer and connect to your server (or use the **Terminal / SSH** tool in your hosting panel):
+```bash
+ssh username@your_server_ip
+```
+*(Example: `ssh u123456789@123.45.67.89`)*
+
+#### Step B: Navigate to Your Domain's Application Directory
+Move to the directory where your domain files are hosted:
+
+- **For cPanel / mPanel (Primary Domain)**:
+  ```bash
+  cd public_html
+  ```
+- **For cPanel / mPanel (Addon Domain / Subdomain)**:
+  ```bash
+  cd domains/yourdomain.com/public_html
+  # or: cd yourdomain.com
+  ```
+- **For Cloudways / VPS (Custom App)**:
+  ```bash
+  cd /var/www/yourdomain.com
+  ```
+
+#### Step C: Install Node Modules on the Server (One-Time)
+Because server data centers have multi-gigabit speeds, installing dependencies directly on the server takes **less than 3 seconds**:
+```bash
+npm install --production
+```
+*(You only ever need to run this command once, or whenever you add a new package to `package.json`)*.
+
+#### Step D: Create Your Server `.env` File
+Create your production `.env` file securely on the server:
+```bash
+nano .env
+```
+Paste your production Telegram MTProto credentials:
+```ini
+PORT=3000
+HOST=0.0.0.0
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=
+SESSION_SECRET=your_super_secret_session_key_production
+API_ID=12345678
+API_HASH=0123456789abcdef0123456789abcdef
+STRING_SESSION=1BWVo...your_generated_string_session...
+STORAGE_CHANNEL_ID=-1001234567890
+INDEX_CHANNEL_ID=-1009876543210
+TEMP_CHUNK_DIR=temp_chunks
+```
+Press `Ctrl + O` then `Enter` to save, and `Ctrl + X` to exit.
+
+---
+
+### 3. Hosting Panel Configuration (cPanel / mPanel / Hostinger / Cloudways)
 
 In your hosting control panel under **Manage Node / Node.js Applications**:
 
-| Setting | Recommended Value |
-| :--- | :--- |
-| **Application Mode** | `Automatic (Production)` |
-| **Node Version** | `20.x` or `22.x` (LTS) |
-| **Startup Command** | `npm start` |
-| **Application Port** | `3000` |
-| **Proxy Path** | `/` (Domain root) |
-| **WebSocket Upgrade** | `Disabled / Unchecked` |
+| Setting | Recommended Value | Notes |
+| :--- | :--- | :--- |
+| **Application Mode** | `Automatic (Production)` | Automatically restarts if memory limits or errors occur |
+| **Node Version** | `20.x` or `22.x` (LTS) | Compatible with Node 18, 20, 22+ |
+| **Startup Command** | `npm start` | Executes `node server.js` |
+| **Application Port** | `3000` | Port where Express listens |
+| **Proxy Path** | `/` | Proxies all primary domain traffic to Node.js |
+| **WebSocket Upgrade** | `Disabled / Unchecked` | Not required (TeleDrive uses standard HTTP REST) |
+
+Click **Deploy Node App** or **Restart Application**. Your live application will immediately boot and start serving traffic!
 
 ---
 
