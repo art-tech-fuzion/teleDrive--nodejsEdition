@@ -1,0 +1,104 @@
+/**
+ * TeleDrive - Interactive Telegram MTProto Session Generator
+ * 
+ * Generates a persistent STRING_SESSION using GramJS (telegram package).
+ * Run: node generate-session.js
+ */
+
+const { TelegramClient } = require('telegram');
+const { StringSession } = require('telegram/sessions');
+const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config();
+
+function askQuestion(query) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+    return new Promise((resolve) => rl.question(query, (ans) => {
+        rl.close();
+        resolve(ans.trim());
+    }));
+}
+
+async function main() {
+    console.log('\n========================================================');
+    console.log('       TeleDrive MTProto Session Generator (GramJS)     ');
+    console.log('========================================================\n');
+
+    let apiId = process.env.API_ID;
+    let apiHash = process.env.API_HASH;
+
+    if (!apiId || apiId === '') {
+        apiId = await askQuestion('Enter your Telegram API_ID (from https://my.telegram.org): ');
+    }
+    if (!apiHash || apiHash === '') {
+        apiHash = await askQuestion('Enter your Telegram API_HASH (from https://my.telegram.org): ');
+    }
+
+    const parsedApiId = parseInt(apiId, 10);
+    if (isNaN(parsedApiId)) {
+        console.error('❌ Error: API_ID must be a valid integer.');
+        process.exit(1);
+    }
+
+    console.log('\nConnecting to Telegram MTProto servers...');
+    const stringSession = new StringSession('');
+    const client = new TelegramClient(stringSession, parsedApiId, apiHash, {
+        connectionRetries: 5,
+    });
+
+    try {
+        await client.start({
+            phoneNumber: async () => await askQuestion('Enter your phone number (with country code, e.g. +1234567890): '),
+            password: async () => await askQuestion('Enter your 2FA password (leave empty if not set): '),
+            phoneCode: async () => await askQuestion('Enter the login verification code received in Telegram: '),
+            onError: (err) => console.error('Telegram Auth Error:', err.message || err),
+        });
+
+        console.log('\n✅ Successfully authenticated with Telegram MTProto!');
+        const sessionString = client.session.save();
+
+        console.log('\n========================================================');
+        console.log('YOUR TELEGRAM STRING_SESSION:');
+        console.log('========================================================');
+        console.log(sessionString);
+        console.log('========================================================\n');
+
+        const envPath = path.join(__dirname, '.env');
+        let envContent = '';
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        } else if (fs.existsSync(path.join(__dirname, '.env.example'))) {
+            envContent = fs.readFileSync(path.join(__dirname, '.env.example'), 'utf8');
+        }
+
+        // Helper to update or append env key
+        function setEnvValue(content, key, val) {
+            const regex = new RegExp(`^${key}=.*$`, 'm');
+            if (regex.test(content)) {
+                return content.replace(regex, `${key}=${val}`);
+            }
+            return content + `\n${key}=${val}`;
+        }
+
+        envContent = setEnvValue(envContent, 'API_ID', parsedApiId);
+        envContent = setEnvValue(envContent, 'API_HASH', apiHash);
+        envContent = setEnvValue(envContent, 'STRING_SESSION', sessionString);
+
+        fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf8');
+        console.log(`💾 Configuration automatically written/updated in .env!`);
+        console.log(`You can now start TeleDrive server with: npm start\n`);
+
+        await client.disconnect();
+        process.exit(0);
+    } catch (error) {
+        console.error('\n❌ Failed to generate session:', error.message || error);
+        await client.disconnect();
+        process.exit(1);
+    }
+}
+
+main();

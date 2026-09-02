@@ -1,0 +1,6 @@
+node_modules/
+.env
+temp_chunks/
+*.log
+.DS_Store
+

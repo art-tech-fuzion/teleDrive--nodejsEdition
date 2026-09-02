@@ -1,0 +1,48 @@
+/**
+ * TeleDrive Views Router
+ */
+
+const express = require('express');
+const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+
+const AuthService = require('../services/auth');
+
+const APP_TEMPLATE_PATH = path.resolve(__dirname, '../../templates/frontend/app.html');
+const LOGIN_TEMPLATE_PATH = path.resolve(__dirname, '../../templates/backend/login.html');
+
+// Login page
+router.get('/login', (req, res) => {
+    if (req.session && req.session.user) {
+        return res.redirect('/');
+    }
+    if (!fs.existsSync(LOGIN_TEMPLATE_PATH)) {
+        return res.status(404).send('Login template not found.');
+    }
+    return res.sendFile(LOGIN_TEMPLATE_PATH);
+});
+
+// Dashboard root
+router.get('/', AuthService.requireAuth, (req, res) => {
+    if (!fs.existsSync(APP_TEMPLATE_PATH)) {
+        return res.status(404).send('Dashboard template not found.');
+    }
+
+    try {
+        let html = fs.readFileSync(APP_TEMPLATE_PATH, 'utf8');
+        const csrfToken = AuthService.getCsrfToken(req);
+        const username = req.session.user || 'Admin';
+
+        html = html.replace(/{{CSRF_TOKEN}}/g, csrfToken);
+        html = html.replace(/{{USERNAME}}/g, username);
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+    } catch (err) {
+        console.error('Error rendering app template:', err.message);
+        return res.status(500).send('Internal Server Error rendering page.');
+    }
+});
+
+module.exports = router;

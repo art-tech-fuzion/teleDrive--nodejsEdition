@@ -1,0 +1,35 @@
+{
+  "name": "teledrive-nodejs",
+  "version": "2.0.0",
+  "description": "High-performance, Zero-Database Cloud Drive powered by Telegram MTProto (GramJS) with 2GB+ multipart streaming",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "generate-session": "node generate-session.js",
+    "test": "node -e \"console.log('Testing configuration...'); require('./src/config'); console.log('Config OK');\""
+  },
+  "keywords": [
+    "telegram",
+    "mtproto",
+    "gramjs",
+    "cloud-storage",
+    "drive",
+    "zero-database",
+    "express"
+  ],
+  "author": "Rahul Kumar (Owner, Art-Tech Fuzion)",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "input": "^1.0.1",
+    "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1",
+    "telegram": "^2.22.2"
+  }
+}
