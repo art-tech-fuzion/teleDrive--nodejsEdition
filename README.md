@@ -10,13 +10,15 @@ It transforms your free Telegram account into an **unlimited, secure, zero-datab
 
 ## 🌟 Key Highlights & Features
 
-- ⚡ **Native 2GB Single-File Uploads**: Bypasses the traditional 50MB Bot API limit by using native Telegram MTProto user client sessions (100% Free Telegram Account).
-- 📦 **Unlimited File Size via Multi-Part Streaming (>2GB)**: Files exceeding 1.95 GB are automatically sliced into 1.9 GB volume parts on upload and seamlessly stream-merged back-to-back on download without requiring disk extraction or unzipping.
-- 🗄️ **Zero-Database Architecture**: Telegram acts as both the raw object storage and the distributed database. Metadata is recorded as JSON delta messages in a private **Index Channel** and periodically compacted into a pinned `master_manifest.json`.
-- 🌊 **Zero-Disk Streaming Downloads**: Downloads and previews stream data directly from Telegram's data centers into the HTTP response in 512KB MTProto chunks with virtually zero server RAM or disk usage.
-- 📊 **Real-Time MTProto Progress**: Track upload and download progress in real-time with byte counters, percentage indicators, and live network transfer speed (MB/s).
-- 🎨 **Google Drive-Inspired UI**: Responsive, dark-themed dashboard with folder hierarchy, search, multi-selection, drag-and-drop uploads, instant previews, and breadcrumb navigation.
-- 🔒 **Enterprise-Grade Security**: Session-based authentication, CSRF token validation, brute-force rate limiting, and complete data isolation inside your private Telegram channels.
+| Feature | Description | Benefit |
+| :--- | :--- | :--- |
+| ⚡ **Native 2GB Uploads** | Uses native MTProto User Client sessions (GramJS) instead of Bot API. | Bypasses traditional 50MB Bot limit (100% Free Telegram Account). |
+| 📦 **Unlimited File Size (>2GB)** | Automatic slicing into 1.9 GB volume parts on upload with seamless back-to-back stream merge on download. | Upload and download 5GB, 10GB+ files without disk extraction. |
+| 🗄️ **Zero-Database Engine** | Telegram serves as both the object storage and distributed NoSQL database via append-only JSON delta logs. | No MySQL, PostgreSQL, SQLite, or MongoDB setup required. |
+| 🌊 **Zero-Disk Streaming** | Streams file bytes directly from Telegram data centers into HTTP responses in 512KB MTProto chunks. | Ultra-low RAM & zero server disk storage consumption. |
+| 📊 **Real-Time Transfer Metrics** | Live byte counters, percentage completion, and transfer speed in MB/s via `XMLHttpRequest.upload`. | Clear visibility during large file transfers. |
+| 🎨 **Google Drive Interface** | Responsive, dark-themed dashboard with folder hierarchy, search, multi-selection, and drag-and-drop. | Familiar, sleek, and intuitive user experience. |
+| 🔒 **Enterprise-Grade Security** | Session-based authentication, CSRF token validation, brute-force rate limiting, and private channel isolation. | Safe, isolated, and protected from unauthorized access. |
 
 ---
 
@@ -40,21 +42,24 @@ graph TD
    - [Step 2: Create Storage & Index Channels](#step-2-create-storage--index-channels)
    - [Step 3: Clone & Install Dependencies](#step-3-clone--install-dependencies)
    - [Step 4: Generate Telegram MTProto Session](#step-4-generate-telegram-mtproto-session)
-   - [Step 5: Verify Environment Variables (.env)](#step-5-verify-environment-variables-env)
+   - [Step 5: Configure Environment Variables (.env)](#step-5-configure-environment-variables-env)
    - [Step 6: Start the Server](#step-6-start-the-server)
 3. [Production Deployment Guide](#-production-deployment-guide)
-   - [Automated GitHub Actions FTP Deployment](#automated-github-actions-ftp-deployment)
-   - [Panel Configuration (cPanel / mPanel / Hostinger / Cloudways)](#panel-configuration-cpanel--mpanel--hostinger--cloudways)
+   - [Automated GitHub Actions FTP Deployment](#1-automated-github-actions-ftp-deployment)
+   - [Server SSH Setup & One-Time Dependency Installation](#2-server-ssh-setup--one-time-dependency-installation)
+   - [Hosting Panel Configuration (cPanel / mPanel / Cloudways / VPS)](#3-hosting-panel-configuration)
 4. [How Multi-Part >2GB Uploads Work](#-how-multi-part-2gb-uploads-work)
 5. [Zero-Database Compaction Engine](#-zero-database-compaction-engine)
 6. [API Reference](#-api-reference)
 7. [Security & Account Safety](#-security--account-safety)
+8. [Author & Credits](#-author--credits)
 
 ---
 
 ## ⚙️ Prerequisites
 
-Before getting started, make sure you have:
+Before running TeleDrive, ensure you have the following ready:
+
 - **Node.js**: `v18.0.0`, `v20.x (LTS)`, or `v22.x` installed.
 - **npm**: `v9.0.0` or higher.
 - **Telegram Account**: A standard, free Telegram account.
@@ -65,49 +70,50 @@ Before getting started, make sure you have:
 
 ### Step 1: Get Telegram API ID and API Hash
 
-Telegram requires standard MTProto developer credentials to allow applications to connect to its cloud network.
+Telegram requires standard MTProto developer credentials to connect to its cloud network:
 
-1. Open your browser and navigate to **[https://my.telegram.org](https://my.telegram.org)**.
-2. Enter your phone number (including international country code, e.g. `+1...` or `+91...`).
-3. You will receive a login confirmation code inside your official Telegram app. Enter the code to log in.
+1. Navigate to **[https://my.telegram.org](https://my.telegram.org)** in your web browser.
+2. Enter your phone number (including country code, e.g., `+1...` or `+91...`).
+3. Enter the login confirmation code sent to your official Telegram app.
 4. Click on **API development tools**.
 5. Fill out the application form:
-   - **App title**: Enter any clean title (e.g. `MyTeleDriveApp`).
-   - **Short name**: Enter a short alphanumeric name with **no spaces or special symbols** (e.g. `teledriveapp1`).
+   - **App title**: Enter any name (e.g., `MyTeleDriveApp`).
+   - **Short name**: Enter a short alphanumeric name in lowercase with **no spaces or hyphens** (e.g., `teledriveapp1`).
    - **Platform**: Select `Web` or `Desktop`.
-   - **URL / Description**: Leave blank or enter any simple description.
+   - **URL / Description**: Leave blank or enter a brief summary.
 6. Click **Create Application**.
-7. Once created, copy the following two values:
+7. Copy the generated credentials:
    - `App api_id` (numeric, e.g., `12345678`)
-   - `App api_hash` (32-character hexadecimal string, e.g., `0123456789abcdef0123456789abcdef`)
+   - `App api_hash` (32-character string, e.g., `0123456789abcdef0123456789abcdef`)
 
-> **Note**: If `my.telegram.org` returns an error when submitting the form, ensure your **Short name** is completely lowercase and contains only letters and numbers (no hyphens, dashes, or spaces).
+> [!TIP]
+> If `my.telegram.org` displays an error during submission, ensure your **Short name** is completely lowercase and contains only letters and numbers without spaces.
 
 ---
 
 ### Step 2: Create Storage & Index Channels
 
-TeleDrive uses two private Telegram channels to separate data storage from metadata indexing:
+TeleDrive utilizes two private Telegram channels to cleanly separate binary storage from file system indexing:
 
-1. Open your Telegram app and create **two new Private Channels**:
-   - **Channel 1 — Storage Channel**: Name it `TeleDrive Storage` (where your binary file parts will be uploaded).
-   - **Channel 2 — Index Channel**: Name it `TeleDrive Index` (where metadata manifests and JSON directory states will be saved).
-2. **Find the Channel IDs**:
+1. Open Telegram and create **two new Private Channels**:
+   - **Channel 1 (Storage Channel)**: Name it `TeleDrive Storage` (stores raw binary file chunks).
+   - **Channel 2 (Index Channel)**: Name it `TeleDrive Index` (stores directory metadata & manifests).
+2. **Retrieve Your Channel IDs**:
    - **Method A (Telegram Web)**:
-     - Open [Telegram Web (web.telegram.org)](https://web.telegram.org/).
-     - Click on your channel. The URL in your browser will look like `https://web.telegram.org/a/#-1001234567890`.
+     - Open [Telegram Web](https://web.telegram.org/).
+     - Open the channel. The URL in the address bar will appear as `https://web.telegram.org/a/#-1001234567890`.
      - The channel ID is `-1001234567890`.
    - **Method B (Via Telegram Bot)**:
-     - Forward any message from your channel to [@userinfobot](https://t.me/userinfobot) or [@username_to_id_bot](https://t.me/username_to_id_bot) to get the numeric channel ID starting with `-100`.
+     - Forward any message from your channel to [@userinfobot](https://t.me/userinfobot) or [@username_to_id_bot](https://t.me/username_to_id_bot) to get the numeric ID starting with `-100`.
 
 ---
 
 ### Step 3: Clone & Install Dependencies
 
-Clone this repository and install the project dependencies:
+Clone the repository and install all required Node.js packages:
 
 ```bash
-git clone https://github.com/your-username/TeleDrive-nodejs.git
+git clone https://github.com/ART-TECH-FUZION/TeleDrive-nodejs.git
 cd TeleDrive-nodejs
 npm install
 ```
@@ -116,55 +122,89 @@ npm install
 
 ### Step 4: Generate Telegram MTProto Session
 
-To allow Node.js to upload 2GB files without asking for an OTP every time the server boots, run the interactive session generator CLI:
+Run the interactive session generator CLI to generate an encrypted `STRING_SESSION`:
 
 ```bash
 npm run generate-session
 ```
 
-**Interactive Prompts**:
+**Interactive Prompts:**
 1. Enter your `API_ID` and `API_HASH` (from Step 1).
-2. Enter your Telegram phone number (with country code).
+2. Enter your Telegram phone number with international country code.
 3. Enter the 5-digit verification code sent to your Telegram app.
-4. *(If 2-Step Verification is enabled)*: Enter your Two-Step Verification cloud password.
+4. *(If Two-Step Verification is enabled)*: Enter your 2FA cloud password.
 
-The script connects to Telegram MTProto, generates an encrypted `STRING_SESSION`, and **automatically creates/updates your `.env` file**.
+> [!NOTE]
+> The script connects to Telegram MTProto, generates an encrypted `STRING_SESSION`, and automatically writes or updates your `.env` file.
 
 ---
 
-### Step 5: Verify Environment Variables (`.env`)
+### Step 5: Configure Environment Variables (`.env`)
 
-Check your [`.env`](file:///.env) file to ensure all parameters are configured:
+Verify your [`.env`](file:///.env) file configuration:
 
 ```ini
-# Application Port (Default: 3000)
+# ===============================================================================
+# Server & Network Configuration
+# ===============================================================================
 PORT=3000
 HOST=0.0.0.0
 
-# Admin Web Login Credentials
+# ===============================================================================
+# Admin Web Authentication
+# ===============================================================================
 ADMIN_USERNAME=admin
-# Leave blank for default 'admin' password on initial setup, or supply a bcrypt hash
-ADMIN_PASSWORD_HASH=
+# Secure bcrypt password hash (leave empty for default password 'admin')
+ADMIN_PASSWORD_HASH=$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
 
-# Cryptographic Session Secret
-SESSION_SECRET=your_super_secret_session_key_replace_in_production
+# ===============================================================================
+# Web Session Security (32+ Character Secret)
+# ===============================================================================
+SESSION_SECRET=e7c8b4f19a0d3e527184bc910a72ef83d95c18402b934710ae728df91024bc6a
 
+# ===============================================================================
 # Telegram MTProto Credentials
+# ===============================================================================
 API_ID=12345678
 API_HASH=0123456789abcdef0123456789abcdef
 STRING_SESSION=1BWVo...your_generated_string_session...
 
-# Telegram Private Channel IDs (must start with -100)
+# ===============================================================================
+# Telegram Private Channels (Must start with -100)
+# ===============================================================================
 STORAGE_CHANNEL_ID=-1001234567890
 INDEX_CHANNEL_ID=-1009876543210
 
-# Temporary File Directory
+# ===============================================================================
+# Local Storage Cache & Chunks
+# ===============================================================================
 TEMP_CHUNK_DIR=temp_chunks
 ```
+
+#### How to Generate Keys & Password Hashes:
+
+- **1. Generate `SESSION_SECRET` (Cryptographic Hex):**
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+  *(Alternative with OpenSSL: `openssl rand -hex 32`)*
+
+- **2. Generate `ADMIN_PASSWORD_HASH` (bcrypt):**
+  ```bash
+  node -e "require('bcryptjs').hash('MySecurePassword123!', 10).then(console.log)"
+  ```
+  Copy the generated `$2a$10$...` hash and paste it into `ADMIN_PASSWORD_HASH` in `.env`.
+
+> [!TIP]
+> - **Bcrypt Hash (Recommended)**: Paste the generated `$2a$...` hash into `ADMIN_PASSWORD_HASH`.
+> - **Blank / Unset**: If left empty, the password defaults to `admin`.
+> - **Plaintext Fallback**: If you enter a plaintext password, the system validates against it directly.
 
 ---
 
 ### Step 6: Start the Server
+
+Start your application in production or development mode:
 
 ```bash
 # Production mode
@@ -178,26 +218,25 @@ Open your browser and navigate to:
 ```
 http://localhost:3000
 ```
-Log in using:
-- **Username**: `admin`
-- **Password**: `admin`
 
-Your personal Telegram Cloud Drive is live and ready!
+**Default Credentials:**
+- **Username**: `admin`
+- **Password**: `admin` *(or the custom password you configured)*
 
 ---
 
 ## 🚀 Production Deployment Guide
 
-### 1. Automated GitHub Actions FTP Deployment (Fast 5-Second Deployments)
+### 1. Automated GitHub Actions FTP Deployment
 
-This repository includes an optimized CI/CD workflow ([`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml)) that deploys your production code to your server via FTP on every push.
+This repository includes an optimized CI/CD workflow ([`.github/workflows/deploy.yml`](file:///.github/workflows/deploy.yml)) that deploys your code to your server via FTP on every push.
 
-> ⚡ **Why Deployments Take Only 5 Seconds**: `node_modules` (6,500+ files) is excluded from FTP transfers. FTP only uploads your clean code files (`server.js`, `src/`, `assets/`, `templates/`, `package.json`), taking under 5 seconds.
+> ⚡ **Ultra-Fast Deployments**: `node_modules` (6,500+ files) is excluded from FTP transfers. FTP only transfers clean source code (`server.js`, `src/`, `assets/`, `templates/`, `package.json`), completing in under 5 seconds.
 
 #### Setting Up GitHub Secrets:
 1. In your GitHub repository, go to **Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions**.
 2. Click **New repository secret** and add:
-   - `FTP_SERVER`: Your server's FTP hostname or IP (e.g. `ftp.yourdomain.com` or `123.45.67.89`).
+   - `FTP_SERVER`: Your server FTP host or IP (e.g., `ftp.yourdomain.com` or `123.45.67.89`).
    - `FTP_USERNAME`: Your FTP account username.
    - `FTP_PASSWORD`: Your FTP account password.
 
@@ -205,76 +244,54 @@ This repository includes an optimized CI/CD workflow ([`.github/workflows/deploy
 
 ### 2. Server SSH Setup & One-Time Dependency Installation
 
-Follow these quick steps to set up your domain directory and install `node_modules` directly on your server:
-
 #### Step A: Connect to Your Server via SSH
-Open your terminal on your computer and connect to your server (or use the **Terminal / SSH** tool in your hosting panel):
 ```bash
 ssh username@your_server_ip
 ```
-*(Example: `ssh u123456789@123.45.67.89`)*
 
-#### Step B: Navigate to Your Domain's Application Directory
-Move to the directory where your domain files are hosted:
-
-- **For cPanel / mPanel (Primary Domain)**:
+#### Step B: Navigate to Your Domain Directory
+- **cPanel / mPanel (Primary Domain)**:
   ```bash
   cd public_html
   ```
-- **For cPanel / mPanel (Addon Domain / Subdomain)**:
+- **cPanel / mPanel (Addon Domain / Subdomain)**:
   ```bash
   cd domains/yourdomain.com/public_html
   # or: cd yourdomain.com
   ```
-- **For Cloudways / VPS (Custom App)**:
+- **Cloudways / VPS / Custom Stack**:
   ```bash
   cd /var/www/yourdomain.com
   ```
 
-#### Step C: Install Node Modules on the Server (One-Time)
-Because server data centers have multi-gigabit speeds, installing dependencies directly on the server takes **less than 3 seconds**:
+#### Step C: Install Dependencies on the Server (One-Time)
 ```bash
 npm install --production
 ```
-*(You only ever need to run this command once, or whenever you add a new package to `package.json`)*.
+*(Only needed once, or whenever you modify `package.json`)*.
 
-#### Step D: Create Your Server `.env` File
-Create your production `.env` file securely on the server:
+#### Step D: Create Your Production `.env` File
 ```bash
 nano .env
 ```
-Paste your production Telegram MTProto credentials:
-```ini
-PORT=3000
-HOST=0.0.0.0
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH=
-SESSION_SECRET=your_super_secret_session_key_production
-API_ID=12345678
-API_HASH=0123456789abcdef0123456789abcdef
-STRING_SESSION=1BWVo...your_generated_string_session...
-STORAGE_CHANNEL_ID=-1001234567890
-INDEX_CHANNEL_ID=-1009876543210
-TEMP_CHUNK_DIR=temp_chunks
-```
-Press `Ctrl + O` then `Enter` to save, and `Ctrl + X` to exit.
+Paste your production environment variables, then press `Ctrl + O`, `Enter` to save, and `Ctrl + X` to exit.
 
 ---
 
-### 3. Hosting Panel Configuration (cPanel / mPanel / Hostinger / Cloudways)
+### 3. Hosting Panel Configuration
 
 In your hosting control panel under **Manage Node / Node.js Applications**:
 
 | Setting | Recommended Value | Notes |
 | :--- | :--- | :--- |
-| **Application Mode** | `Automatic (Production)` | Automatically restarts if memory limits or errors occur |
-| **Node Version** | `20.x` or `22.x` (LTS) | Compatible with Node 18, 20, 22+ |
+| **Application Mode** | `Automatic (Production)` | Automatically restarts on unexpected exit or memory threshold |
+| **Node Version** | `20.x` or `22.x` (LTS) | Fully compatible with Node 18, 20, and 22+ |
 | **Startup Command** | `npm start` | Executes `node server.js` |
-| **Application Port** | `3000` | Port where Express listens |
+| **Application Port** | `3000` | Internal port where Express listens |
 | **Proxy Path** | `/` | Proxies all primary domain traffic to Node.js |
-| **WebSocket Upgrade** | `Disabled / Unchecked` | Not required (TeleDrive uses standard HTTP REST) |
+| **WebSocket Upgrade** | `Disabled / Unchecked` | Not required (TeleDrive uses standard HTTP streaming) |
 
-Click **Deploy Node App** or **Restart Application**. Your live application will immediately boot and start serving traffic!
+Click **Deploy Node App** or **Restart Application** to bring your live site online.
 
 ---
 
@@ -313,61 +330,61 @@ sequenceDiagram
 
 ## 🗄️ Zero-Database Compaction Engine
 
-TeleDrive requires **no MySQL, PostgreSQL, SQLite, or MongoDB**. It uses an append-only delta log model directly on your private Telegram Index Channel:
+TeleDrive operates completely independently of traditional databases using an append-only delta architecture directly on your private Telegram Index Channel:
 
-1. **Delta Logging**: Every CRUD operation (file uploaded, folder created, renamed, or deleted) logs a small JSON text message to the Index Channel.
-2. **Local Caching**: The file system index is cached in-memory and in `temp_chunks/index_cache.json` for sub-millisecond API response times.
-3. **50-Message Compaction**: When 50 delta messages accumulate:
-   - TeleDrive consolidates all records into an optimized, unified directory state.
+1. **Delta Logging**: Every CRUD action (file uploaded, folder created, renamed, or deleted) posts a lightweight JSON delta message to the Index Channel.
+2. **Local Caching**: The file system index is cached in memory and in `temp_chunks/index_cache.json` for sub-millisecond API response times.
+3. **Automated Compaction**: When delta messages reach the compaction threshold:
+   - TeleDrive merges all delta records into a unified directory tree.
    - Uploads a new `master_manifest.json` document to the Index Channel.
-   - Pins the new manifest.
-   - Automatically unpins the old manifest and purges obsolete delta messages.
+   - Pins the new manifest message.
+   - Unpins old manifests and purges superseded delta messages.
 
 ---
 
 ## 🔌 API Reference
 
-TeleDrive provides a RESTful API and action dispatcher (`/api` and backward-compatible `/api/index.php`):
+TeleDrive provides a RESTful API and unified action router (`/api` and backward-compatible `/api/index.php`):
 
 ### Authentication Endpoints
 
 | Endpoint | Method | Params | Description |
 | :--- | :--- | :--- | :--- |
-| `/api?action=auth.status` | `GET` | — | Check current authentication status & CSRF token |
+| `/api?action=auth.status` | `GET` | — | Check authentication state & CSRF token |
 | `/api?action=auth.login` | `POST` | `username`, `password` | Authenticate and create session |
-| `/api?action=auth.logout` | `POST` | — | Terminate session |
+| `/api?action=auth.logout` | `POST` | — | Destroy session and log out |
 
 ### File & Folder Endpoints
 
 | Endpoint | Method | Params | Description |
 | :--- | :--- | :--- | :--- |
-| `/api?action=files.list` | `GET` | `parent_id`, `search` | List files and folders in directory |
-| `/api?action=files.direct_upload` | `POST` | `file`, `parent_id`, `upload_id` | Direct single-file upload ($\le$ 2 GB) |
-| `/api?action=files.upload_progress` | `GET` | `upload_id` | Live Telegram MTProto upload progress |
+| `/api?action=files.list` | `GET` | `parent_id`, `search` | List items in active directory |
+| `/api?action=files.direct_upload` | `POST` | `file`, `parent_id`, `upload_id` | Single-file direct upload ($\le$ 2 GB) |
+| `/api?action=files.upload_progress` | `GET` | `upload_id` | Live MTProto upload transfer progress |
 | `/api?action=files.upload_chunk` | `POST` | `chunk`, `upload_id`, `chunk_index` | Upload volume part (> 2 GB) |
-| `/api?action=files.complete_upload`| `POST` | `upload_id`, `filename`, `size` | Finalize multipart upload |
-| `/api?action=files.download` | `GET` | `id` | Stream file directly to browser |
-| `/api?action=files.preview` | `GET` | `id` | Stream inline preview for images/videos |
-| `/api?action=folder.create` | `POST` | `name`, `parent_id` | Create a new folder |
+| `/api?action=files.complete_upload`| `POST` | `upload_id`, `filename`, `size` | Finalize multi-part upload |
+| `/api?action=files.download` | `GET` | `id` | Stream binary file directly to browser |
+| `/api?action=files.preview` | `GET` | `id` | Inline stream for image/video preview |
+| `/api?action=folder.create` | `POST` | `name`, `parent_id` | Create a new virtual folder |
 | `/api?action=item.rename` | `POST` | `id`, `name` | Rename a file or folder |
-| `/api?action=item.move` | `POST` | `id`, `target_parent_id` | Move item to different folder |
-| `/api?action=item.delete` | `POST` | `id` | Delete file/folder and remove cloud parts |
+| `/api?action=item.move` | `POST` | `id`, `target_parent_id` | Move item to a different folder |
+| `/api?action=item.delete` | `POST` | `id` | Delete item & remove Telegram cloud parts |
 | `/api?action=items.bulk_delete` | `POST` | `ids` | Bulk delete multiple items |
 
 ---
 
 ## 🛡️ Security & Account Safety
 
-1. **Keep Channels Private**: Never set your Storage Channel or Index Channel to public. Private channels ensure your files are only accessible by your authenticated TeleDrive server.
-2. **Protect Your `.env`**: Never commit your `.env` file or `STRING_SESSION` to GitHub or share it publicly.
-3. **Dedicated API Keys**: Always generate and use your own `API_ID` and `API_HASH` from `my.telegram.org` to ensure your account traffic is verified and compliant with Telegram's terms.
+1. **Keep Channels Private**: Never set your Storage or Index Channel to public. Private channels ensure data is accessible only by your authenticated server instance.
+2. **Protect Your `.env`**: Never commit your `.env` file or `STRING_SESSION` to GitHub or public repositories.
+3. **Dedicated API Keys**: Always create and use your own `API_ID` and `API_HASH` from `my.telegram.org` to ensure proper authorization.
 
 ---
 
 ## 👨‍💻 Author & Credits
 
-- **Creator & Lead Developer**: **Rahul Kumar** ATF Owner
-- **Support & Manage by**: **Art-Tech Fuzion** Team
+- **Creator & Lead Developer**: **[Rahul Kumar](https://github.com/rahulkumar)** (Art-Tech Fuzion)
+- **Supported & Maintained by**: **Art-Tech Fuzion Team**
 - **Project Repository**: [TeleDrive-nodejs](https://github.com/ART-TECH-FUZION/TeleDrive-nodejs)
 
 ---
