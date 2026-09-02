@@ -39,7 +39,7 @@ const config = {
     CACHE_FILE: path.join(TEMP_CHUNK_DIR, 'index_cache.json'),
 
     // Constants
-    COMPACTION_THRESHOLD: 50,
+    COMPACTION_THRESHOLD: 10,
     PART_SIZE_LIMIT: 1.9 * 1024 * 1024 * 1024, // 1.9 GB in bytes for large file multipart chunking
     CHUNK_UPLOAD_BATCH_SIZE: 10 * 1024 * 1024, // 10MB chunk threshold
 };
