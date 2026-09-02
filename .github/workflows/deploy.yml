@@ -16,18 +16,25 @@ jobs:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🚀 Deploy dist/ Code to Server via FTP (Lightning Fast)
+      - name: 🚀 Deploy dist/ Code to Server public_html/ via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist/
+          server-dir: public_html/
           dangerous-clean-slate: false
           exclude: |
             **/.git*
             **/.git*/**
-            **/node_modules/**
-            node_modules/
+            **/.env*
             .env
-            temp_chunks/*
+            **/node_modules/**
+            **/node_modules
+            node_modules/
+            **/temp_chunks/**
+            temp_chunks/
+            temp_chunks/**
+            temp/**
+            .DS_Store
