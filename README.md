@@ -366,8 +366,8 @@ TeleDrive provides a RESTful API and action dispatcher (`/api` and backward-comp
 
 ## 👨‍💻 Author & Credits
 
-- **Creator & Lead Developer**: **Rahul Kumar**
-- **Organization / Brand**: **Art-Tech Fuzion**
+- **Creator & Lead Developer**: **Rahul Kumar** ATF Owner
+- **Support & Manage by**: **Art-Tech Fuzion** Team
 - **Project Repository**: [TeleDrive-nodejs](https://github.com/ART-TECH-FUZION/TeleDrive-nodejs)
 
 ---
