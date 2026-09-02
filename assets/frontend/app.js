@@ -1648,7 +1648,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function formatDate(timestamp) {
     if (!timestamp) return "—";
-    const date = new Date(timestamp * 1000);
+    let date;
+    if (typeof timestamp === "number") {
+      date = new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp);
+    } else if (typeof timestamp === "string") {
+      const trimmed = timestamp.trim();
+      if (/^\d+$/.test(trimmed)) {
+        const num = parseInt(trimmed, 10);
+        date = new Date(num < 10000000000 ? num * 1000 : num);
+      } else {
+        date = new Date(trimmed);
+      }
+    } else {
+      date = new Date(timestamp);
+    }
+
+    if (!date || isNaN(date.getTime())) return "—";
+
     return date.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
