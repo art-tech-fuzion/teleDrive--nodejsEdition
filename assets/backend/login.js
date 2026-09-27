@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 TeleDrive.toast('Authentication successful. Redirecting...', 'success');
                 setTimeout(() => {
-                    window.location.reload();
+                    window.location.href = '/';
                 }, 800);
             } else {
                 TeleDrive.toast(data.error || 'Invalid credentials.', 'error');

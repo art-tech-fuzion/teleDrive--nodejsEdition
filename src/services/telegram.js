@@ -76,72 +76,97 @@ class TelegramService {
         }
 
         const client = await this.getClient();
-        let entity = null;
-
-        // Try direct getEntity / getInputEntity
-        try {
-            entity = await client.getInputEntity(channelId);
-            if (entity) {
-                this.resolvedEntities.set(cacheKey, entity);
-                return entity;
-            }
-        } catch (e) {}
-
-        try {
-            entity = await client.getEntity(channelId);
-            if (entity) {
-                this.resolvedEntities.set(cacheKey, entity);
-                return entity;
-            }
-        } catch (e) {}
-
-        // Try numeric conversion (including BigInt & stripped -100 prefix)
         const strId = String(channelId).trim();
-        const attempts = [];
-        if (/^-?\d+$/.test(strId)) {
-            attempts.push(parseInt(strId, 10));
-            try { attempts.push(BigInt(strId)); } catch (e) {}
-            if (strId.startsWith('-100')) {
-                const stripped = strId.substring(4);
-                attempts.push(parseInt(stripped, 10));
-                attempts.push(parseInt('-' + stripped, 10));
-                try { attempts.push(BigInt(stripped)); } catch (e) {}
+        const stripped = strId.replace(/^-100/, '').replace(/^-/, '');
+
+        // 1. Search in dialogs FIRST (Contains the true access_hash needed by Telegram MTProto)
+        let dialogs = [];
+        try {
+            const mainDialogs = await client.getDialogs({ limit: 500 });
+            dialogs.push(...mainDialogs);
+        } catch (e) {
+            console.warn('Main dialog search warning:', e.message);
+        }
+
+        try {
+            // Also search archived dialogs if the channel was archived
+            const archivedDialogs = await client.getDialogs({ limit: 500, folder: 1 });
+            dialogs.push(...archivedDialogs);
+        } catch (e) {
+            // Folder 1 may not exist if no archived chats
+        }
+
+        for (const d of dialogs) {
+            const dId = d.id ? d.id.toString().trim() : '';
+            const dStripped = dId.replace(/^-100/, '').replace(/^-/, '');
+            const entityId = d.entity?.id ? d.entity.id.toString().trim() : '';
+            const entityStripped = entityId.replace(/^-100/, '').replace(/^-/, '');
+
+            const isMatch = (
+                dId === strId ||
+                dStripped === stripped ||
+                entityId === strId ||
+                entityStripped === stripped ||
+                (d.name && d.name.trim().toLowerCase() === strId.toLowerCase())
+            );
+
+            if (isMatch) {
+                const input = d.inputEntity || (d.entity ? await client.getInputEntity(d.entity) : null);
+                if (input && input.className !== 'InputPeerChat') {
+                    this.resolvedEntities.set(cacheKey, input);
+                    return input;
+                }
             }
         }
 
-        for (const target of attempts) {
+        // 2. If channelId is a public username (e.g. @my_channel)
+        if (!/^-?\d+$/.test(strId)) {
             try {
-                entity = await client.getInputEntity(target);
-                if (entity) {
-                    this.resolvedEntities.set(cacheKey, entity);
-                    return entity;
-                }
-            } catch (e) {}
-            try {
-                entity = await client.getEntity(target);
-                if (entity) {
+                const entity = await client.getInputEntity(strId);
+                if (entity && entity.className !== 'InputPeerChat') {
                     this.resolvedEntities.set(cacheKey, entity);
                     return entity;
                 }
             } catch (e) {}
         }
 
-        // Final attempt: search in dialogs
+        // 3. Direct getInputEntity on client (only accept if not InputPeerChat)
         try {
-            const dialogs = await client.getDialogs({ limit: 200 });
-            for (const d of dialogs) {
-                const dId = String(d.id);
-                if (dId === strId || dId === strId.replace(/^-100/, '') || ('-100' + dId) === strId) {
-                    entity = d.inputEntity || d.entity;
-                    if (entity) {
-                        this.resolvedEntities.set(cacheKey, entity);
-                        return entity;
-                    }
+            const entity = await client.getInputEntity(channelId);
+            if (entity && !(strId.startsWith('-100') && entity.className === 'InputPeerChat')) {
+                this.resolvedEntities.set(cacheKey, entity);
+                return entity;
+            }
+        } catch (e) {}
+
+        // 4. Direct getEntity on client
+        try {
+            const entity = await client.getEntity(channelId);
+            if (entity) {
+                const input = await client.getInputEntity(entity);
+                if (input && !(strId.startsWith('-100') && input.className === 'InputPeerChat')) {
+                    this.resolvedEntities.set(cacheKey, input);
+                    return input;
                 }
             }
         } catch (e) {}
 
-        throw new Error(`Could not resolve Telegram Channel entity for: ${channelId}. Make sure the channel ID is correct and your account is an administrator or member of the channel.`);
+        const availableChannels = (dialogs || [])
+            .filter((d) => d.isChannel || d.isGroup)
+            .map((d) => `"${d.title || d.name}" (ID: ${d.id ? d.id.toString() : 'unknown'})`)
+            .join(', ');
+
+        console.error(`❌ [TelegramService] Could not resolve channel: ${channelId}`);
+        console.error(`📋 [TelegramService] Available channels/groups in this account: [${availableChannels || 'None'}]`);
+
+        throw new Error(
+            `Could not resolve Telegram Channel entity for: ${channelId}.\n` +
+            `Available channels in connected Telegram account: [${availableChannels || 'None'}].\n` +
+            `Please ensure that:\n` +
+            `1. The account in STRING_SESSION has joined or created the channel.\n` +
+            `2. You have sent at least ONE message (e.g. "init") in the channel so Telegram includes it in dialogs.\n` +
+            `3. The channel ID in .env matches one of the IDs listed above.`
+        );
     }
 
     /**

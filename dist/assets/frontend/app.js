@@ -200,7 +200,15 @@ document.addEventListener("DOMContentLoaded", () => {
       if (forceRefresh) {
         url += "&refresh=1";
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (res.status === 401) {
+        renderItems();
+        TeleDrive.toast("Session expired. Please log in again.", "warning");
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1200);
+        return;
+      }
       const rawText = await res.text();
       let data = null;
       try {

@@ -20,6 +20,9 @@ const storageEngine = require('./src/services/storageEngine');
 
 const app = express();
 
+// Trust reverse proxy (Hostinger Nginx/Passenger)
+app.set('trust proxy', 1);
+
 // -----------------------------------------------------------------------------
 // 1. Security & Header Hardening Middleware
 // -----------------------------------------------------------------------------
@@ -44,14 +47,61 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
+// File-based persistent session store for multi-process / server restarts
+class DiskSessionStore extends session.Store {
+    constructor() {
+        super();
+        this.dir = path.join(__dirname, 'temp_chunks', '.sessions');
+        if (!fs.existsSync(this.dir)) {
+            fs.mkdirSync(this.dir, { recursive: true });
+        }
+    }
+    get(sid, cb) {
+        const filePath = path.join(this.dir, `${sid}.json`);
+        if (!fs.existsSync(filePath)) return cb(null, null);
+        try {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            if (data.cookie && data.cookie.expires && new Date(data.cookie.expires) < new Date()) {
+                try { fs.unlinkSync(filePath); } catch (e) {}
+                return cb(null, null);
+            }
+            return cb(null, data);
+        } catch (e) {
+            return cb(null, null);
+        }
+    }
+    set(sid, sess, cb) {
+        const filePath = path.join(this.dir, `${sid}.json`);
+        try {
+            fs.writeFileSync(filePath, JSON.stringify(sess), 'utf8');
+            return cb && cb(null);
+        } catch (e) {
+            return cb && cb(e);
+        }
+    }
+    destroy(sid, cb) {
+        const filePath = path.join(this.dir, `${sid}.json`);
+        try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            return cb && cb(null);
+        } catch (e) {
+            return cb && cb(null);
+        }
+    }
+    touch(sid, sess, cb) {
+        return this.set(sid, sess, cb);
+    }
+}
+
 app.use(session({
+    store: new DiskSessionStore(),
     name: 'TELEDRIVE_SESSID',
     secret: config.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: false, // Ensures session works behind Hostinger Nginx reverse proxy
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     }
