@@ -276,6 +276,17 @@ function build() {
         } else if (ext === '.js') {
             const compressed = compressJS(originalContent.toString('utf8'), file.relPath);
             finalContent = Buffer.from(compressed, 'utf8');
+        } else if (file.relPath === 'package.json') {
+            try {
+                const pkg = JSON.parse(originalContent.toString('utf8'));
+                if (pkg.scripts) {
+                    // In production dist, build is already done, so provide a safe no-op
+                    pkg.scripts.build = "echo 'Production build ready'";
+                }
+                finalContent = Buffer.from(JSON.stringify(pkg, null, 2), 'utf8');
+            } catch (e) {
+                finalContent = originalContent;
+            }
         } else {
             // Keep unchanged (.svg, .json, .example, .php, .htaccess)
             finalContent = originalContent;
