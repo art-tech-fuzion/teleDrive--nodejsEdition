@@ -183,7 +183,7 @@ class TelegramService {
             file: filePath,
             caption: caption || `TeleDrive: ${filename}`,
             forceDocument: true,
-            workers: 4,
+            workers: 12, // High-performance parallel MTProto upload workers
             progressCallback: (progress) => {
                 if (typeof progressCallback === 'function') {
                     progressCallback(progress);
@@ -212,7 +212,7 @@ class TelegramService {
             file: customFile,
             caption: caption || filename,
             forceDocument: true,
-            workers: 2,
+            workers: 4,
         });
 
         const doc = sentMessage.media?.document;
@@ -236,7 +236,7 @@ class TelegramService {
         }
 
         const buffer = await client.downloadMedia(messages[0], {
-            workers: 2,
+            workers: 4,
         });
 
         return buffer ? buffer.toString('utf8') : null;
@@ -262,12 +262,13 @@ class TelegramService {
         const doc = message.media.document;
         const dcId = doc?.dcId || message.media.dcId;
 
-        // Use iterDownload for efficient chunk-by-chunk MTProto streaming
-        const chunkSize = 512 * 1024; // 512KB per MTProto chunk
+        // Use high-throughput MTProto chunk streaming with 1MB chunk size & 8 workers
+        const chunkSize = 1024 * 1024; // 1MB per MTProto chunk for high-speed download
         for await (const chunk of client.iterDownload({
             file: message.media,
             requestSize: chunkSize,
             dcId: dcId,
+            workers: 8,
         })) {
             if (res.writableEnded || res.destroyed) {
                 break;

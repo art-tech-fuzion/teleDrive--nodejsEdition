@@ -124,7 +124,7 @@ async function handleAction(action, req, res) {
                     session_set: Boolean(config.STRING_SESSION),
                     storage_channel: config.STORAGE_CHANNEL_ID || 'Not set',
                     index_channel: config.INDEX_CHANNEL_ID || 'Not set',
-                    engine_version: '2.0.0 (MTProto Node.js)',
+                    engine_version: config.ENGINE_VERSION,
                     node_version: process.version,
                     max_part_size: Helpers.formatBytes(config.PART_SIZE_LIMIT),
                 });
@@ -251,8 +251,10 @@ async function handleAction(action, req, res) {
                             percent: 100,
                             loaded: fileSize,
                             total: fileSize,
+                            item: newEntry,
+                            needs_purge: Boolean(newEntry.needs_purge),
                         });
-                        setTimeout(() => uploadProgressTracker.delete(uploadId), 15000);
+                        setTimeout(() => uploadProgressTracker.delete(uploadId), 30000);
                     }
 
                     return Helpers.success(res, {

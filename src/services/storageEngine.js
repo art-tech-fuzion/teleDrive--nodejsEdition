@@ -453,7 +453,7 @@ class StorageEngine {
      */
     async rebuildAndPinManifest(itemsMap, oldPinnedMsgId = 0) {
         const manifestObj = {
-            version: '2.0.0',
+            version: config.VERSION,
             engine: 'TeleDrive MTProto Zero-DB',
             generated_at: new Date().toISOString(),
             total_items: Object.keys(itemsMap).length,

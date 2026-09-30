@@ -172,9 +172,9 @@ const PORT = config.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 if (require.main === module) {
-    app.listen(PORT, HOST, async () => {
+    const server = app.listen(PORT, HOST, async () => {
         console.log('\n========================================================');
-        console.log(`🚀 TeleDrive (Node.js + MTProto) is running at:`);
+        console.log(`🚀 TeleDrive v${config.VERSION} (Node.js + MTProto) is running at:`);
         console.log(`   http://localhost:${PORT}`);
         console.log('========================================================');
 
@@ -199,6 +199,11 @@ if (require.main === module) {
         }
         console.log('========================================================\n');
     });
+
+    // Disable socket timeouts for large file uploads & MTProto chunk streaming
+    server.timeout = 0;
+    server.keepAliveTimeout = 650000; // 10+ minutes
+    server.headersTimeout = 660000;
 }
 
 module.exports = app;

@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/global.css">
-    <link rel="stylesheet" href="/assets/frontend/app.css">
+    <link rel="stylesheet" href="/assets/global.css?v={{ASSET_VERSION}}">
+    <link rel="stylesheet" href="/assets/frontend/app.css?v={{ASSET_VERSION}}">
     <!-- CSRF token for all authenticated POST requests -->
     <meta name="csrf-token" content="{{CSRF_TOKEN}}">
 </head>
@@ -63,7 +63,7 @@
             <div class="td-sidebar-storage">
                 <div class="td-storage-info">
                     <div class="td-storage-title">Telegram Cloud (MTProto)</div>
-                    <div class="td-storage-desc">Unlimited Storage Engine</div>
+                    <div class="td-storage-desc">Unlimited Storage Engine &bull; v{{APP_VERSION}}</div>
                 </div>
                 <div class="td-storage-bar">
                     <div class="td-storage-bar-progress" style="width: 100%;"></div>
@@ -240,7 +240,7 @@
         </div>
     </div>
 
-    <script src="/assets/global.js"></script>
-    <script src="/assets/frontend/app.js"></script>
+    <script src="/assets/global.js?v={{ASSET_VERSION}}"></script>
+    <script src="/assets/frontend/app.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

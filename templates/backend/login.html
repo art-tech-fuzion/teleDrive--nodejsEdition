@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/assets/global.css">
-    <link rel="stylesheet" href="/assets/backend/login.css">
+    <link rel="stylesheet" href="/assets/global.css?v={{ASSET_VERSION}}">
+    <link rel="stylesheet" href="/assets/backend/login.css?v={{ASSET_VERSION}}">
 </head>
 <body class="td-login-body">
     <div class="td-login-wrapper">
@@ -47,12 +47,12 @@
             </form>
 
             <div class="td-login-footer">
-                <span>Zero-Database Architecture &bull; MTProto GramJS &bull; Node.js</span>
+                <span>Zero-Database Architecture &bull; MTProto GramJS &bull; v{{APP_VERSION}}</span>
             </div>
         </div>
     </div>
 
-    <script src="/assets/global.js"></script>
-    <script src="/assets/backend/login.js"></script>
+    <script src="/assets/global.js?v={{ASSET_VERSION}}"></script>
+    <script src="/assets/backend/login.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

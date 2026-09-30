@@ -20,7 +20,24 @@ router.get('/login', (req, res) => {
     if (!fs.existsSync(LOGIN_TEMPLATE_PATH)) {
         return res.status(404).send('Login template not found.');
     }
-    return res.sendFile(LOGIN_TEMPLATE_PATH);
+    try {
+        let html = fs.readFileSync(LOGIN_TEMPLATE_PATH, 'utf8');
+        const config = require('../config');
+        let assetVersion = config.VERSION;
+        try {
+            const loginJsPath = path.resolve(__dirname, '../../assets/backend/login.js');
+            if (fs.existsSync(loginJsPath)) {
+                assetVersion = `${assetVersion}.${fs.statSync(loginJsPath).mtimeMs}`;
+            }
+        } catch (e) {}
+
+        html = html.replace(/{{ASSET_VERSION}}/g, assetVersion);
+        html = html.replace(/{{APP_VERSION}}/g, config.VERSION);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(html);
+    } catch (err) {
+        return res.sendFile(LOGIN_TEMPLATE_PATH);
+    }
 });
 
 // Dashboard root
@@ -34,8 +51,20 @@ router.get('/', AuthService.requireAuth, (req, res) => {
         const csrfToken = AuthService.getCsrfToken(req);
         const username = req.session.user || 'Admin';
 
+        // Dynamic file-modified timestamp or centralized version for cache-busting
+        const config = require('../config');
+        let assetVersion = config.VERSION;
+        try {
+            const appJsPath = path.resolve(__dirname, '../../assets/frontend/app.js');
+            if (fs.existsSync(appJsPath)) {
+                assetVersion = `${assetVersion}.${fs.statSync(appJsPath).mtimeMs}`;
+            }
+        } catch (e) {}
+
         html = html.replace(/{{CSRF_TOKEN}}/g, csrfToken);
         html = html.replace(/{{USERNAME}}/g, username);
+        html = html.replace(/{{ASSET_VERSION}}/g, assetVersion);
+        html = html.replace(/{{APP_VERSION}}/g, config.VERSION);
 
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         return res.send(html);

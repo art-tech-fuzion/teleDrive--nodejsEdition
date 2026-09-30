@@ -1398,9 +1398,11 @@ document.addEventListener("DOMContentLoaded", () => {
           const xhr = new XMLHttpRequest();
           activeXhrs.add(xhr);
 
+          let isFinished = false;
+
           // Poll server for live Telegram MTProto upload progress
           progressInterval = setInterval(async () => {
-            if (isCancelled) {
+            if (isCancelled || isFinished) {
               if (progressInterval) clearInterval(progressInterval);
               return;
             }
@@ -1409,41 +1411,63 @@ document.addEventListener("DOMContentLoaded", () => {
               const pJson = await pRes.json();
               const pData = pJson.progress || (pJson.data && pJson.data.progress);
               if (pData && pData.status === "uploading_telegram") {
-                const p = pData.percent || 0;
-                fillBar.style.width = `${p}%`;
-                percentLabel.textContent = `${p}%`;
+                const tgPercent = pData.percent || 0;
+                // Combine: 50% for browser buffer + 50% for telegram upload
+                const totalPercent = Math.min(99, 50 + Math.round(tgPercent * 0.49));
+                fillBar.style.width = `${totalPercent}%`;
+                percentLabel.textContent = `${totalPercent}%`;
                 sizeLabel.textContent = `${formatBytes(pData.loaded || 0)} / ${formatBytes(file.size)}`;
                 if (pData.speed > 0) {
-                  speedLabel.textContent = `${formatBytes(pData.speed)}/s (Telegram)`;
+                  speedLabel.textContent = `${formatBytes(pData.speed)}/s (Telegram Cloud)`;
                 } else {
-                  speedLabel.textContent = `Uploading to Telegram...`;
+                  speedLabel.textContent = `Uploading to Telegram Cloud...`;
                 }
               } else if (pData && pData.status === "indexing") {
                 fillBar.style.width = `99%`;
                 percentLabel.textContent = `99%`;
                 speedLabel.textContent = `Saving metadata...`;
+              } else if (pData && pData.status === "completed" && pData.item && !isFinished) {
+                // If Telegram completed before XHR fired load
+                isFinished = true;
+                if (progressInterval) clearInterval(progressInterval);
+                activeXhrs.delete(xhr);
+                state.items.unshift(pData.item);
+                renderItems();
+                if (pData.needs_purge) {
+                  state.needsIndexPurge = true;
+                }
+                resolve({ success: true, item: pData.item });
               }
             } catch (e) {}
           }, 350);
 
           xhr.upload.onprogress = (e) => {
-            if (isCancelled) return;
-            if (e.lengthComputable && e.loaded < file.size) {
-              const localPercent = Math.min(20, Math.round((e.loaded / file.size) * 20));
+            if (isCancelled || isFinished) return;
+            if (e.lengthComputable && e.loaded <= file.size) {
+              // Browser upload represents first 50% of full progress
+              const localPercent = Math.min(50, Math.round((e.loaded / file.size) * 50));
               fillBar.style.width = `${localPercent}%`;
               percentLabel.textContent = `${localPercent}%`;
               sizeLabel.textContent = `${formatBytes(e.loaded)} / ${formatBytes(file.size)}`;
-              speedLabel.textContent = "Buffering...";
+              const elapsedSec = (Date.now() - startTime) / 1000;
+              if (elapsedSec > 0.3) {
+                const speed = e.loaded / elapsedSec;
+                speedLabel.textContent = `${formatBytes(speed)}/s (Buffering)`;
+              } else {
+                speedLabel.textContent = "Uploading to server...";
+              }
             }
           };
 
-          xhr.onload = () => {
+          xhr.onload = async () => {
+            if (isFinished) return;
             if (progressInterval) clearInterval(progressInterval);
             activeXhrs.delete(xhr);
             if (xhr.status >= 200 && xhr.status < 300) {
               try {
                 const json = JSON.parse(xhr.responseText);
                 if (json && json.success) {
+                  isFinished = true;
                   const newItem = json.item || (json.data && json.data.item) || json.folder;
                   if (newItem) {
                     state.items.unshift(newItem);
@@ -1453,13 +1477,47 @@ document.addEventListener("DOMContentLoaded", () => {
                     state.needsIndexPurge = true;
                   }
                   resolve(json);
+                  return;
                 } else {
                   reject(new Error(json?.error || json?.message || "Direct upload failed"));
+                  return;
                 }
               } catch (parseErr) {
+                // Fallback check: Did Telegram complete in progress tracker?
+                try {
+                  const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
+                  const checkJson = await checkRes.json();
+                  const pData = checkJson.progress || (checkJson.data && checkJson.data.progress);
+                  if (pData && (pData.status === "completed" || pData.item)) {
+                    isFinished = true;
+                    if (pData.item) {
+                      state.items.unshift(pData.item);
+                      renderItems();
+                    }
+                    resolve({ success: true, item: pData.item });
+                    return;
+                  }
+                } catch (e) {}
                 reject(new Error(`Server returned invalid response (HTTP ${xhr.status})`));
+                return;
               }
             } else {
+              // Check if upload actually completed on Telegram before rejecting
+              try {
+                const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
+                const checkJson = await checkRes.json();
+                const pData = checkJson.progress || (checkJson.data && checkJson.data.progress);
+                if (pData && (pData.status === "completed" || pData.item)) {
+                  isFinished = true;
+                  if (pData.item) {
+                    state.items.unshift(pData.item);
+                    renderItems();
+                  }
+                  resolve({ success: true, item: pData.item });
+                  return;
+                }
+              } catch (e) {}
+
               let errorMsg = `HTTP error ${xhr.status}`;
               try {
                 const errJson = JSON.parse(xhr.responseText);
@@ -1469,13 +1527,32 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           };
 
-          xhr.onerror = () => {
+          xhr.onerror = async () => {
+            if (isFinished) return;
             if (progressInterval) clearInterval(progressInterval);
             activeXhrs.delete(xhr);
+
+            // Double check progress tracker in case network dropped right after upload to Telegram
+            try {
+              const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
+              const checkJson = await checkRes.json();
+              const pData = checkJson.progress || (checkJson.data && checkJson.data.progress);
+              if (pData && (pData.status === "completed" || pData.item)) {
+                isFinished = true;
+                if (pData.item) {
+                  state.items.unshift(pData.item);
+                  renderItems();
+                }
+                resolve({ success: true, item: pData.item });
+                return;
+              }
+            } catch (e) {}
+
             reject(new Error("Network error during direct upload"));
           };
 
           xhr.onabort = () => {
+            if (isFinished) return;
             if (progressInterval) clearInterval(progressInterval);
             activeXhrs.delete(xhr);
             reject(new Error("Upload aborted"));
@@ -1490,6 +1567,7 @@ document.addEventListener("DOMContentLoaded", () => {
           formData.append("file", file);
 
           xhr.open("POST", "/api/upload", true);
+          xhr.timeout = 0; // Prevent client socket timeout
           xhr.setRequestHeader("X-CSRF-Token", getCsrfToken());
           xhr.send(formData);
         });

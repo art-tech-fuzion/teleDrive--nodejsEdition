@@ -42,6 +42,10 @@ const config = {
     COMPACTION_THRESHOLD: 10,
     PART_SIZE_LIMIT: 1.9 * 1024 * 1024 * 1024, // 1.9 GB in bytes for large file multipart chunking
     CHUNK_UPLOAD_BATCH_SIZE: 10 * 1024 * 1024, // 10MB chunk threshold
+    
+    // Centralized Versioning
+    VERSION: require('../version').VERSION,
+    ENGINE_VERSION: require('../version').ENGINE_VERSION,
 };
 
 /**
