@@ -8,9 +8,9 @@
  * - Index channel metadata messages, pinning, unpinning, and batch purges
  */
 
-const { TelegramClient, Api } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { CustomFile } = require("telegram/client/uploads");
+const { TelegramClient, Api } = require("teleproto");
+const { StringSession } = require("teleproto/sessions");
+const { CustomFile } = require("teleproto/client/uploads");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
@@ -346,13 +346,11 @@ class TelegramService {
     const doc = message.media.document;
     const dcId = doc?.dcId || message.media.dcId;
 
-    // Use high-throughput MTProto chunk streaming with 1MB chunk size & 8 workers
-    const chunkSize = 1024 * 1024; // 1MB per MTProto chunk for high-speed download
-    for await (const chunk of client.iterDownload({
-      file: message.media,
+    // Stream directly via MTProto iterDownload(file, params) with 1MB chunk size for max speed
+    const chunkSize = 1024 * 1024; // 1MB per MTProto chunk
+    for await (const chunk of client.iterDownload(message, {
       requestSize: chunkSize,
       dcId: dcId,
-      workers: 8,
     })) {
       if (res.writableEnded || res.destroyed) {
         break;

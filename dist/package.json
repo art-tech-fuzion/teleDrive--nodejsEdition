@@ -28,10 +28,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "input": "^1.0.1",
     "mime-types": "^2.1.35",
     "multer": "^2.0.0",
-    "telegram": "^2.22.2"
+    "teleproto": "^1.229.1"
   },
   "overrides": {
     "ip-address": "^10.7.1",

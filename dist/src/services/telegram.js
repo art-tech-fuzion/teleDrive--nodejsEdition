@@ -1,6 +1,6 @@
-const { TelegramClient, Api } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { CustomFile } = require("telegram/client/uploads");
+const { TelegramClient, Api } = require("teleproto");
+const { StringSession } = require("teleproto/sessions");
+const { CustomFile } = require("teleproto/client/uploads");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
@@ -311,11 +311,9 @@ class TelegramService {
     const dcId = doc?.dcId || message.media.dcId;
 
     const chunkSize = 1024 * 1024;
-    for await (const chunk of client.iterDownload({
-      file: message.media,
+    for await (const chunk of client.iterDownload(message, {
       requestSize: chunkSize,
       dcId: dcId,
-      workers: 8,
     })) {
       if (res.writableEnded || res.destroyed) {
         break;

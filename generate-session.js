@@ -14,8 +14,8 @@ process.on('warning', (warning) => {
     console.warn(warning);
 });
 
-const { TelegramClient } = require('telegram');
-const { StringSession } = require('telegram/sessions');
+const { TelegramClient } = require('teleproto');
+const { StringSession } = require('teleproto/sessions');
 const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
