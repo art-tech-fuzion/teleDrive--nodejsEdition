@@ -63,14 +63,47 @@ const directUploadMiddleware = multer({
     }
 });
 
+// Safe read-only actions exempt from CSRF checks and allowed on GET
+const SAFE_ACTIONS = new Set([
+    'auth.login',
+    'auth.status',
+    'system.status',
+    'files.list',
+    'folders.list',
+    'files.download',
+    'files.preview',
+    'files.stream_preview',
+    'files.upload_progress',
+]);
+
 /**
  * Action Dispatcher Controller
  */
 async function handleAction(action, req, res) {
     try {
+        // Enforce CSRF protection and HTTP method safety on all state-changing actions
+        if (!SAFE_ACTIONS.has(action)) {
+            // Block safe HTTP methods (GET/HEAD) for state-changing actions
+            if (req.method === 'GET' || req.method === 'HEAD') {
+                return Helpers.error(res, 'Method not allowed for state-changing action.', 405);
+            }
+            // If logging out but no session exists, allow clean exit without requiring valid CSRF token
+            if (action === 'auth.logout' && (!req.session || !req.session.user)) {
+                res.clearCookie('TELEDRIVE_SESSID');
+                return Helpers.success(res, {}, 'Logged out successfully.');
+            }
+            // Enforce CSRF token verification
+            if (!AuthService.verifyCsrf(req)) {
+                return Helpers.error(res, 'Invalid or missing CSRF token.', 403);
+            }
+        }
+
         switch (action) {
             // --- 1. Authentication ---
             case 'auth.login': {
+                if (req.method !== 'POST') {
+                    return Helpers.error(res, 'Method not allowed for authentication.', 405);
+                }
                 const username = (req.body.username || '').trim();
                 const password = (req.body.password || '').trim();
                 const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
@@ -97,10 +130,15 @@ async function handleAction(action, req, res) {
             }
 
             case 'auth.logout': {
-                req.session.destroy(() => {
-                    res.clearCookie('connect.sid');
+                if (req.session) {
+                    req.session.destroy(() => {
+                        res.clearCookie('TELEDRIVE_SESSID');
+                        return Helpers.success(res, {}, 'Logged out successfully.');
+                    });
+                } else {
+                    res.clearCookie('TELEDRIVE_SESSID');
                     return Helpers.success(res, {}, 'Logged out successfully.');
-                });
+                }
                 return;
             }
 
@@ -271,6 +309,7 @@ async function handleAction(action, req, res) {
 
             // --- Live Upload Progress Query ---
             case 'files.upload_progress': {
+                if (!req.session?.user) return Helpers.error(res, 'Unauthorized.', 401);
                 const uploadId = (req.query.upload_id || req.body.upload_id || '').replace(/[^\w\-]/g, '');
                 const progress = uploadProgressTracker.get(uploadId) || {
                     status: 'idle',
@@ -529,6 +568,7 @@ async function handleAction(action, req, res) {
                 const isDownload = (action === 'files.download');
                 const disposition = isDownload ? 'attachment' : 'inline';
                 const safeFilename = Helpers.sanitizeFilename(target.name);
+                const asciiFilename = safeFilename.replace(/["\\;\r\n\x00-\x1F\x7F]/g, '_');
                 const encodedFilename = encodeURIComponent(safeFilename);
                 const mimeType = target.mime_type || Helpers.getMimeType(safeFilename);
 
@@ -538,7 +578,7 @@ async function handleAction(action, req, res) {
                 }
 
                 res.setHeader('Content-Type', mimeType);
-                res.setHeader('Content-Disposition', `${disposition}; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`);
+                res.setHeader('Content-Disposition', `${disposition}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`);
                 res.setHeader('Cache-Control', 'no-transform, private, max-age=3600');
                 res.setHeader('X-Content-Type-Options', 'nosniff');
                 if (totalSize > 0) {
@@ -658,7 +698,11 @@ async function handleAction(action, req, res) {
         }
     } catch (err) {
         console.error(`API Error on action [${action}]:`, err);
-        return Helpers.error(res, err.message || 'Internal Server Error', 500);
+        // MED-1 Fix: Never expose raw internal error details (Telegram channel IDs, file paths,
+        // session tokens) to the client in production. Always log server-side.
+        const isProd = process.env.NODE_ENV === 'production';
+        const clientMessage = isProd ? 'An internal server error occurred. Please try again.' : (err.message || 'Internal Server Error');
+        return Helpers.error(res, clientMessage, 500);
     }
 }
 
@@ -712,7 +756,7 @@ router.all('/', (req, res, next) => {
 // RESTful route fallbacks
 router.get('/auth/status', (req, res) => handleAction('auth.status', req, res));
 router.post('/auth/login', (req, res) => handleAction('auth.login', req, res));
-router.all('/auth/logout', (req, res) => handleAction('auth.logout', req, res));
+router.post('/auth/logout', (req, res) => handleAction('auth.logout', req, res));
 router.get('/files', (req, res) => handleAction('files.list', req, res));
 router.get('/folders', (req, res) => handleAction('folders.list', req, res));
 router.post('/folders', (req, res) => handleAction('folder.create', req, res));

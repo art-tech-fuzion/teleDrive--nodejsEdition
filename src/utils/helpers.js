@@ -9,12 +9,12 @@ const mime = require('mime-types');
 
 const Helpers = {
     /**
-     * Sanitize filename to prevent directory traversal and illegal characters
+     * Sanitize filename to prevent directory traversal, header injection, and illegal characters
      */
     sanitizeFilename(filename) {
         if (!filename) return 'unnamed_file';
-        let safe = path.basename(filename);
-        safe = safe.replace(/[/\\?%*:|"<>]/g, '_');
+        let safe = path.basename(String(filename));
+        safe = safe.replace(/[/\\?%*:|"<>;&\r\n\x00-\x1F\x7F]/g, '_');
         safe = safe.replace(/^\.+/, '');
         return safe.trim() || 'unnamed_file';
     },

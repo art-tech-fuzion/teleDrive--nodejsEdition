@@ -42,7 +42,22 @@ app.use((req, res, next) => {
 // -----------------------------------------------------------------------------
 // 2. Request Parsers & Sessions
 // -----------------------------------------------------------------------------
-app.use(cors({ origin: true, credentials: true }));
+// Secure CORS configuration: only allow configured origins, or block cross-origin requests by default
+const allowedOrigins = process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()).filter(Boolean)
+    : null;
+
+app.use(cors({
+    origin: allowedOrigins ? (origin, callback) => {
+        // Allow requests with no origin (e.g. mobile apps, curl, or same-origin)
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Blocked by CORS policy'));
+        }
+    } : false, // Default to false: prevents unauthorized cross-origin web requests
+    credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
@@ -56,9 +71,16 @@ class DiskSessionStore extends session.Store {
             fs.mkdirSync(this.dir, { recursive: true });
         }
     }
+    _getFilePath(sid) {
+        if (!sid) return null;
+        // Strictly sanitize sid to prevent directory traversal
+        const safeSid = String(sid).replace(/[^a-zA-Z0-9_\-]/g, '');
+        if (!safeSid) return null;
+        return path.join(this.dir, `${safeSid}.json`);
+    }
     get(sid, cb) {
-        const filePath = path.join(this.dir, `${sid}.json`);
-        if (!fs.existsSync(filePath)) return cb(null, null);
+        const filePath = this._getFilePath(sid);
+        if (!filePath || !fs.existsSync(filePath)) return cb(null, null);
         try {
             const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             if (data.cookie && data.cookie.expires && new Date(data.cookie.expires) < new Date()) {
@@ -71,7 +93,8 @@ class DiskSessionStore extends session.Store {
         }
     }
     set(sid, sess, cb) {
-        const filePath = path.join(this.dir, `${sid}.json`);
+        const filePath = this._getFilePath(sid);
+        if (!filePath) return cb && cb(new Error('Invalid session ID'));
         try {
             fs.writeFileSync(filePath, JSON.stringify(sess), 'utf8');
             return cb && cb(null);
@@ -80,7 +103,8 @@ class DiskSessionStore extends session.Store {
         }
     }
     destroy(sid, cb) {
-        const filePath = path.join(this.dir, `${sid}.json`);
+        const filePath = this._getFilePath(sid);
+        if (!filePath) return cb && cb(null);
         try {
             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
             return cb && cb(null);
@@ -101,7 +125,8 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: false, // Ensures session works behind Hostinger Nginx reverse proxy
+        // Secure dynamically based on environment or explicit flag; supports reverse-proxy HTTPS via trust proxy
+        secure: process.env.COOKIE_SECURE === 'true' ? true : (process.env.COOKIE_SECURE === 'false' ? false : (process.env.NODE_ENV === 'production' ? true : 'auto')),
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     }
@@ -158,10 +183,14 @@ app.use((err, req, res, next) => {
     if (res.headersSent) {
         return next(err);
     }
+    // MED-1 Fix: Never expose raw error internals (stack traces, Telegram details) to the client in production.
+    const isProd = process.env.NODE_ENV === 'production';
+    const clientMessage = isProd ? 'An internal server error occurred. Please try again.' : (err.message || 'Internal Server Error');
     res.status(500).json({
         success: false,
         status: 'error',
-        message: err.message || 'Internal Server Error',
+        message: clientMessage,
+        error: clientMessage,
     });
 });
 
@@ -177,6 +206,9 @@ if (require.main === module) {
         console.log(`🚀 TeleDrive v${config.VERSION} (Node.js + MTProto) is running at:`);
         console.log(`   http://localhost:${PORT}`);
         console.log('========================================================');
+        if (!config.ADMIN_PASSWORD_HASH) {
+            console.warn("⚠️  SECURITY WARNING: ADMIN_PASSWORD_HASH is not configured in .env! Default password 'admin' is active. Please set a strong bcrypt password hash.");
+        }
 
         if (config.isConfigured()) {
             console.log('📡 Telegram MTProto credentials detected.');

@@ -40,6 +40,16 @@ router.get('/login', (req, res) => {
     }
 });
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Dashboard root
 router.get('/', AuthService.requireAuth, (req, res) => {
     if (!fs.existsSync(APP_TEMPLATE_PATH)) {
@@ -62,7 +72,7 @@ router.get('/', AuthService.requireAuth, (req, res) => {
         } catch (e) {}
 
         html = html.replace(/{{CSRF_TOKEN}}/g, csrfToken);
-        html = html.replace(/{{USERNAME}}/g, username);
+        html = html.replace(/{{USERNAME}}/g, escapeHtml(username));
         html = html.replace(/{{ASSET_VERSION}}/g, assetVersion);
         html = html.replace(/{{APP_VERSION}}/g, config.VERSION);
 

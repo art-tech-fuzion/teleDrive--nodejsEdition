@@ -4,6 +4,82 @@ All notable changes to the TeleDrive project will be documented in this file.
 
 ---
 
+## [3.0.0] - 2026-10-01
+
+### 🚀 Major Highlights
+Version **v3.0.0** is a major milestone release focusing on **Zero-Database Engine Resilience**, **14-Point Comprehensive Security Hardening**, **Upload Concurrency & Rate-Limit Shielding**, and a **Standardized Production Build Pipeline**.
+
+---
+
+### 🗄️ Zero-Database Storage & Compaction Engine
+1. **Empty Index Channel Auto-Initialization**:
+   - When the index channel is empty upon clicking **Refresh** or initializing storage, the engine automatically creates, uploads, and pins an empty JSON root manifest (`files_manifest.json`).
+   - If index data or delta messages already exist, the engine loads them without creating unnecessary duplicate manifests.
+2. **Automated Checkpoint Pinning on Compaction**:
+   - Fixed compaction cycles (triggered at the 10-message delta threshold): whenever deltas are merged into a new consolidated manifest document, the resulting JSON file is **automatically pinned** in the Index Channel, and obsolete delta messages are pruned.
+3. **Telegram MTProto Rate-Limit (`FLOOD_WAIT`) Resilience**:
+   - Integrated a 3-stage exponential backoff retry loop in `TelegramService.sendTextMessage` to survive rapid bursts.
+   - Configured `floodSleepThreshold: 120` in `TelegramClient` initialization to allow GramJS to sleep through temporary Telegram rate-limit throttles automatically.
+4. **Resilient Compaction Execution**:
+   - Wrapped compaction and index rebuild procedures in robust `try/catch` handlers in `storageEngine.js`, ensuring background compaction faults never crash active upload or download streams.
+5. **Temporary File Buffer Strategy**:
+   - Refactored `uploadDocumentBuffer` to stream via temporary files on disk, resolving GramJS `MEDIA_INVALID` errors caused by empty CustomFile paths.
+
+---
+
+### 🛡️ 14-Point Full Codebase Security & Integrity Hardening
+A comprehensive security audit was executed across all layers with 100% resolution:
+
+1. **CRIT-1 — CSRF Protection Enforced**:
+   - Enforced `AuthService.verifyCsrf(req)` across all mutating API routes (`handleAction()`) using an explicit `SAFE_ACTIONS` allowlist for read-only endpoints.
+2. **CRIT-2 — Auth Guard on Upload Progress**:
+   - Added session authorization verification to `files.upload_progress` (`/api?action=files.upload_progress`) to prevent unauthenticated access to active transfer metadata.
+3. **CRIT-3 — CORS Origin Lockdown**:
+   - Replaced wildcard CORS with strict `CORS_ORIGIN` environment whitelist; disabled cross-origin by default (`false`) to eliminate credentialed cross-origin attacks.
+4. **HIGH-1 — Environment-Aware Secure Cookies**:
+   - Dynamically set `cookie.secure` based on environment and proxy headers (`trust proxy`), ensuring HTTPS cookie protection behind reverse proxies.
+5. **HIGH-2 — Stored XSS Prevention in UI Attributes**:
+   - Applied `escapeHtml()` to all file and folder `title` tooltip attributes in `app.js` to prevent HTML attribute breakout via crafted file names.
+6. **HIGH-3 — Template Injection Defense**:
+   - Added server-side HTML escaping for `{{USERNAME}}` replacements in `views.js`.
+7. **HIGH-4 — Default Credential Warning**:
+   - Added loud console warnings on startup and login if `ADMIN_PASSWORD_HASH` is not configured in `.env`.
+8. **MED-1 — Information Leakage Suppression**:
+   - Sanitized production error responses in `api.js` and `server.js` so internal Telegram IDs, channel hashes, and stack traces are never exposed to clients, while retaining full server logs.
+9. **MED-2 — DiskSessionStore Path Traversal Protection**:
+   - Sanitized session IDs in `DiskSessionStore._getFilePath()` using strict alphanumeric regex to prevent directory traversal outside `.sessions/`.
+10. **MED-3 — Content-Disposition Header Injection Defense**:
+    - Sanitized download filenames in HTTP headers to strip quotes (`"`), semicolons (`;`), and control characters.
+11. **MED-4 — State-Changing HTTP Method Enforcement**:
+    - Restricted mutating endpoints (including `auth.logout`) to POST only, returning `405 Method Not Allowed` on GET/HEAD requests.
+12. **LOW-1 — Session Cookie Clearance Alignment**:
+    - Synchronized `res.clearCookie('TELEDRIVE_SESSID')` on logout to properly invalidate the session cookie in browsers.
+13. **LOW-2 — In-Memory Lockout Map Pruning**:
+    - Added automatic stale-record pruning to `loginAttempts` to prevent memory growth under brute-force probes.
+14. **LOW-3 — Safe Constant-Time Comparison**:
+    - Added length validation before `crypto.timingSafeEqual()` in `AuthService.verifyCsrf()` to prevent uncaught exceptions.
+
+---
+
+### 🎨 Frontend & User Experience
+1. **Strict 5-File Selection Limit**:
+   - Added strict validation in the file selector handler (`app.js`). If more than 5 files are selected at once, the selection is rejected, the file input is cleared, and an informative toast alert is displayed.
+2. **Queue Item Dismissal**:
+   - Enabled dismiss/cancel actions for individual failed or completed items in the upload queue.
+3. **Dynamic Cache-Busting**:
+   - Implemented `filemtime`-based dynamic versioning (`{{ASSET_VERSION}}`) for scripts and stylesheets rendered by `views.js`.
+
+---
+
+### 📦 Build & Compression Pipeline
+1. **Automated `npm run build` Script**:
+   - Added [`build-dist.js`](./build-dist.js) to clean, compress, and regenerate the `dist/` directory on demand.
+   - Compresses CSS (up to 36.5% reduction), minifies HTML templates (up to 36.2% reduction), strips comments and optimizes JavaScript bundles.
+   - Automatically injects security `index.php` ("Silence is golden") files into every subfolder to prevent directory listing on Apache/Hostinger environments.
+   - Validates all generated JavaScript bundles via VM script syntax verification during build.
+
+---
+
 ## [2.1.0] - 2026-09-30
 
 ### 🛡️ Security Vulnerabilities Patched (15 CVEs Cleared)
@@ -55,27 +131,6 @@ In version **v2.0.0**, automated security scanners (such as Hostinger hPanel Sec
 5. **Interactive Session Generator Hardening (`generate-session.js`):**
    - **Issue in v2.0.0:** Running `npm run generate-session` on modern Node.js versions (v22/v25) caused an asynchronous runtime warning `(node) Warning: '--localstorage-file' was provided without a valid path` to print directly over the input prompt. If an empty input was entered, the script prematurely crashed with `❌ Error: API_ID must be a valid integer.`
    - **Fix in v2.1.0:** Suppressed the experimental webstorage warning and implemented interactive validation loops that gracefully re-prompt for `API_ID` and `API_HASH` until valid input is provided.
-
----
-
-### 📦 Distribution (`dist/`) Minification & Compression
-
-- **v2.0.0 State:** Several critical files in `dist/` were uncompressed and unminified (e.g. `dist/assets/frontend/app.js` was 1,691 lines, and server files were plain multi-line scripts).
-- **v2.1.0 State:** 100% of production files in `dist/` are fully minified into single-line optimized bundles:
-  - `dist/assets/frontend/app.js` minified (reduced from 60 KB $\rightarrow$ 34 KB).
-  - `dist/assets/backend/login.js` and `dist/assets/global.js` minified.
-  - `dist/assets/frontend/app.css` and `dist/assets/backend/login.css` minified.
-  - Server modules (`dist/server.js`, `dist/src/services/telegram.js`, `dist/src/utils/helpers.js`) minified.
-  - All templates (`dist/templates/frontend/app.html`, `dist/templates/backend/login.html`) minified.
-
----
-
-### 🔒 Security & Privacy Audit Verification
-
-- **Git Commit History Audit:** Verified that no sensitive credentials (`API_ID`, `API_HASH`, `STRING_SESSION`, or `ADMIN_PASSWORD_HASH`) were ever committed to Git history.
-- **Local Secret Isolation:** Removed duplicate `dist/.env` to eliminate any accidental leak vector.
-- **`.gitignore` Hardening:** Strengthened wildcard patterns (`**/.env*`, `**/*.session*`) to permanently prevent tracking of environment or session files in any directory.
-- **CI/CD Security:** Confirmed that `.github/workflows/deploy.yml` utilizes GitHub Encrypted Secrets exclusively and excludes all `.env*` and `node_modules` during FTP sync.
 
 ---
 

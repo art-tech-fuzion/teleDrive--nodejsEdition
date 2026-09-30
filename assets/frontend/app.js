@@ -26,8 +26,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const method = (options.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
-      options.headers = options.headers || {};
-      options.headers["X-CSRF-Token"] = getCsrfToken();
+      const csrf = getCsrfToken();
+      if (options.headers instanceof Headers) {
+        options.headers.set("X-CSRF-Token", csrf);
+      } else {
+        options.headers = options.headers || {};
+        options.headers["X-CSRF-Token"] = csrf;
+      }
     }
     return fetch(cleanUrl, options);
   }
@@ -180,7 +185,7 @@ document.addEventListener("DOMContentLoaded", () => {
       isDanger: true,
     });
     if (confirmed) {
-      await fetch("/api/index.php?action=auth.logout");
+      await apiFetch("/api/index.php?action=auth.logout", { method: "POST" });
       window.location.reload();
     }
   };
@@ -367,7 +372,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="td-grid-card-icon">${iconData.icon}</span>
                 </div>
                 <div class="td-grid-card-info">
-                    <div class="td-grid-card-name" title="${item.name}">${escapeHtml(item.name)}</div>
+                    <div class="td-grid-card-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
                     <div class="td-grid-card-meta">
                         <span>${item.type === "folder" ? "Folder" : formatBytes(item.size)}</span>
                         <span>${formatDate(item.updated_at || item.created_at)}</span>
@@ -446,7 +451,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td>
                     <div class="td-table-name-cell">
                         <span class="td-file-icon">${iconData.icon}</span>
-                        <span title="${item.name}">${escapeHtml(item.name)}</span>
+                        <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
                     </div>
                 </td>
                 <td>${item.type === "folder" ? "—" : formatBytes(item.size)}</td>
@@ -1261,8 +1266,22 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // 16. Client-Side Chunked File Upload Engine with Cancellation
-  async function handleFilesUpload(files) {
-    if (!files || files.length === 0) return;
+  const MAX_UPLOAD_BATCH = 5;
+
+  async function handleFilesUpload(rawFiles) {
+    if (!rawFiles || rawFiles.length === 0) return;
+
+    const files = Array.from(rawFiles);
+
+    if (files.length > MAX_UPLOAD_BATCH) {
+      TeleDrive.toast(
+        `Selection limit exceeded: You can select a maximum of ${MAX_UPLOAD_BATCH} files at a time. Please select 5 or fewer files.`,
+        "error",
+        5000
+      );
+      if (fileInput) fileInput.value = "";
+      return;
+    }
 
     uploadQueue.style.display = "block";
 
@@ -1521,7 +1540,9 @@ document.addEventListener("DOMContentLoaded", () => {
               let errorMsg = `HTTP error ${xhr.status}`;
               try {
                 const errJson = JSON.parse(xhr.responseText);
-                if (errJson && errJson.error) errorMsg = errJson.error;
+                if (errJson && (errJson.error || errJson.message)) {
+                  errorMsg = errJson.error || errJson.message;
+                }
               } catch (e) {}
               reject(new Error(errorMsg));
             }
@@ -1687,6 +1708,14 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         speedLabel.textContent = "Failed";
         fillBar.style.backgroundColor = "var(--color-danger, #ef4444)";
+        cancelBtn.textContent = "✕ Dismiss";
+        cancelBtn.style.display = "inline-block";
+        cancelBtn.onclick = () => {
+          qItem.remove();
+          if (queueItems.children.length === 0) {
+            uploadQueue.style.display = "none";
+          }
+        };
       }
     }
   }

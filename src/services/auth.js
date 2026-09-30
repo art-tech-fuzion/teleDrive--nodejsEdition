@@ -28,6 +28,16 @@ const AuthService = {
             }
         }
 
+        // Periodically prune stale lockout records to prevent memory leaks
+        if (loginAttempts.size > 200) {
+            const now = Date.now();
+            for (const [ip, data] of loginAttempts.entries()) {
+                if (data.lockoutUntil < now) {
+                    loginAttempts.delete(ip);
+                }
+            }
+        }
+
         const validUsername = (username === config.ADMIN_USERNAME);
         let validPassword = false;
 
@@ -42,6 +52,7 @@ const AuthService = {
             validPassword = (password === config.ADMIN_PASSWORD_HASH);
         } else {
             // Default setup password if empty: 'admin'
+            console.warn("⚠️  [SECURITY WARNING] Logging in using default fallback password 'admin'! Please set ADMIN_PASSWORD_HASH in .env");
             validPassword = (password === 'admin');
         }
 
@@ -77,14 +88,21 @@ const AuthService = {
     },
 
     /**
-     * Verify CSRF token
+     * Verify CSRF token using length-safe constant-time comparison
      */
     verifyCsrf(req) {
-        const submitted = req.headers['x-csrf-token'] || req.body._csrf || req.query._csrf;
+        const submitted = req.headers['x-csrf-token'] || 
+                          (req.body && (req.body._csrf || req.body.csrf_token)) || 
+                          (req.query && (req.query._csrf || req.query.csrf_token));
         const expected = req.session ? req.session.csrfToken : null;
         if (!expected || !submitted) return false;
         try {
-            return crypto.timingSafeEqual(Buffer.from(submitted), Buffer.from(expected));
+            const submittedBuf = Buffer.from(String(submitted));
+            const expectedBuf = Buffer.from(String(expected));
+            if (submittedBuf.length !== expectedBuf.length) {
+                return false;
+            }
+            return crypto.timingSafeEqual(submittedBuf, expectedBuf);
         } catch (e) {
             return false;
         }

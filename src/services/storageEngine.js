@@ -97,6 +97,7 @@ class StorageEngine {
         let items = {};
         let pinnedMsgId = 0;
         let deltaCount = 0;
+        let manifestFound = false;
 
         try {
             // 1. Fetch current pinned message from Telegram Index Channel
@@ -116,6 +117,7 @@ class StorageEngine {
                                     items[it.id] = it;
                                 }
                                 deltaCount = parseInt(manifestData.delta_count || '0', 10);
+                                manifestFound = true;
                             }
                         }
                     } catch (e) {
@@ -124,48 +126,84 @@ class StorageEngine {
                 }
             }
 
-            // 2. If no pinned manifest exists (bootstrap mode)
-            if (pinnedMsgId === 0 && Object.keys(items).length === 0) {
-                console.log('🚀 Initializing fresh TeleDrive Index Channel with bootstrap manifest...');
-                pinnedMsgId = await this.rebuildAndPinManifest({}, 0);
-                items = {};
-                deltaCount = 0;
+            // 2. Fetch messages from the index channel to check for data and deltas
+            const channelMessages = await telegramService.getMessages(this.indexChannel, {
+                limit: 100,
+            });
+
+            // If no pinned manifest was found, check if an unpinned master_manifest.json document exists in channel
+            if (!manifestFound && channelMessages && channelMessages.length > 0) {
+                for (const msg of channelMessages) {
+                    if (msg.media && msg.media.document) {
+                        try {
+                            const manifestJson = await telegramService.downloadDocumentBuffer(
+                                this.indexChannel,
+                                msg.id
+                            );
+                            if (manifestJson) {
+                                const manifestData = JSON.parse(manifestJson);
+                                if (manifestData && Array.isArray(manifestData.items)) {
+                                    for (const it of manifestData.items) {
+                                        items[it.id] = it;
+                                    }
+                                    deltaCount = parseInt(manifestData.delta_count || '0', 10);
+                                    pinnedMsgId = msg.id;
+                                    manifestFound = true;
+                                    break;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                }
             }
 
-            // 3. Scan delta messages above the pinned message ID
-            if (pinnedMsgId > 0) {
-                const deltaMessages = await telegramService.getMessages(this.indexChannel, {
-                    minId: pinnedMsgId,
-                    limit: 100,
-                });
+            // 3. Replay delta messages from channel
+            if (channelMessages && channelMessages.length > 0) {
+                const sortedMessages = [...channelMessages].sort((a, b) => a.id - b.id);
+                for (const msg of sortedMessages) {
+                    if (manifestFound && pinnedMsgId > 0 && msg.id <= pinnedMsgId) {
+                        continue;
+                    }
 
-                if (deltaMessages && deltaMessages.length > 0) {
-                    // Telegram returns messages newest to oldest; sort oldest to newest to apply sequentially
-                    const sortedDeltas = [...deltaMessages].sort((a, b) => a.id - b.id);
+                    if (!msg.message || !msg.message.trim().startsWith('{')) {
+                        continue;
+                    }
 
-                    for (const msg of sortedDeltas) {
-                        if (!msg.message || !msg.message.trim().startsWith('{')) {
-                            continue;
-                        }
-
-                        try {
-                            const delta = JSON.parse(msg.message.trim());
+                    try {
+                        const delta = JSON.parse(msg.message.trim());
+                        if (delta && delta.id) {
                             deltaCount += 1;
-
-                            if (delta.deleted && delta.id) {
+                            if (delta.deleted) {
                                 delete items[delta.id];
-                            } else if (delta.id) {
+                            } else {
                                 items[delta.id] = {
                                     ...(items[delta.id] || {}),
                                     ...delta,
                                     index_message_id: msg.id,
                                 };
                             }
-                        } catch (err) {
-                            // Non-JSON delta message, skip
                         }
-                    }
+                    } catch (err) {}
                 }
+            }
+
+            // 4. Check if ANY data exists in the index channel:
+            // Data exists if a manifest document exists, OR at least one file/folder delta exists
+            const hasDataInChannel = manifestFound || Object.keys(items).length > 0;
+
+            if (!hasDataInChannel) {
+                // ONLY if the index channel is completely empty: create empty JSON document, upload it, and pin it
+                console.log('🚀 Index channel is completely empty. Creating and pinning empty manifest...');
+                try {
+                    pinnedMsgId = await this.rebuildAndPinManifest({}, 0);
+                    items = {};
+                    deltaCount = 0;
+                } catch (pinErr) {
+                    console.warn('Notice: Could not pin empty bootstrap manifest:', pinErr.message);
+                }
+            } else {
+                // If anything already exists in the channel, do NOT create or pin an empty JSON document.
+                // Simply use the loaded data.
             }
 
             const result = {
@@ -218,12 +256,17 @@ class StorageEngine {
         index.delta_count = (index.delta_count || 0) + 1;
         index.total_items = Object.keys(index.items).length;
 
-        // Check 50-message compaction threshold
+        // Check compaction threshold
         let needsPurge = false;
         if (index.delta_count >= config.COMPACTION_THRESHOLD) {
             console.log(`📦 Delta count reached ${index.delta_count}. Running compaction cycle...`);
-            await this.rebuildAndPinManifest(index.items, index.pinned_message_id);
-            needsPurge = true;
+            try {
+                await this.rebuildAndPinManifest(index.items, index.pinned_message_id);
+                needsPurge = true;
+            } catch (compactionErr) {
+                console.error('Compaction failed during file entry creation:', compactionErr.message);
+                this.writeLocalCache(index);
+            }
         } else {
             this.writeLocalCache(index);
         }
@@ -263,8 +306,13 @@ class StorageEngine {
 
         let needsPurge = false;
         if (index.delta_count >= config.COMPACTION_THRESHOLD) {
-            await this.rebuildAndPinManifest(index.items, index.pinned_message_id);
-            needsPurge = true;
+            try {
+                await this.rebuildAndPinManifest(index.items, index.pinned_message_id);
+                needsPurge = true;
+            } catch (compactionErr) {
+                console.error('Compaction failed during folder creation:', compactionErr.message);
+                this.writeLocalCache(index);
+            }
         } else {
             this.writeLocalCache(index);
         }
@@ -435,8 +483,13 @@ class StorageEngine {
 
         let needsPurge = false;
         if (index.delta_count >= config.COMPACTION_THRESHOLD) {
-            await this.rebuildAndPinManifest(items, index.pinned_message_id);
-            needsPurge = true;
+            try {
+                await this.rebuildAndPinManifest(items, index.pinned_message_id);
+                needsPurge = true;
+            } catch (compactionErr) {
+                console.error('Compaction failed during item deletion:', compactionErr.message);
+                this.writeLocalCache(index);
+            }
         } else {
             this.writeLocalCache(index);
         }
@@ -473,23 +526,31 @@ class StorageEngine {
 
         const newPinnedMsgId = uploaded.message_id;
 
-        // 2. PIN the new master manifest document
+        // 2. Purge old delta messages and old manifests before pinning the new one
         try {
-            await telegramService.pinMessage(this.indexChannel, newPinnedMsgId);
+            await this.purgeOldMessages(oldPinnedMsgId || 0, newPinnedMsgId);
         } catch (err) {
-            console.error('Failed to pin new manifest:', err.message);
+            console.error('Compaction purge error:', err.message);
         }
 
-        // 3. Unpin and purge old pinned manifest and delta messages
-        if (oldPinnedMsgId && oldPinnedMsgId > 0 && oldPinnedMsgId !== newPinnedMsgId) {
+        // 3. PIN the new consolidated master manifest document (with verification and retries)
+        let pinSuccess = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                await telegramService.unpinMessage(this.indexChannel, oldPinnedMsgId);
-            } catch (e) {}
-            
-            // Background cleanup of old messages below new pin
-            this.purgeOldMessages(oldPinnedMsgId, newPinnedMsgId).catch(err => {
-                console.error('Compaction purge error:', err.message);
-            });
+                const res = await telegramService.pinMessage(this.indexChannel, newPinnedMsgId);
+                if (res) {
+                    console.log(`📌 Master manifest pinned successfully (ID: ${newPinnedMsgId}) on attempt ${attempt}`);
+                    pinSuccess = true;
+                    break;
+                }
+            } catch (err) {
+                console.warn(`Warning: Pin attempt ${attempt} failed:`, err.message);
+            }
+            await new Promise((r) => setTimeout(r, 400));
+        }
+
+        if (!pinSuccess) {
+            console.error(`❌ Could not pin new manifest message ID: ${newPinnedMsgId}`);
         }
 
         // Update local cache
@@ -509,15 +570,21 @@ class StorageEngine {
      */
     async purgeOldMessages(startMsgId, endMsgId) {
         try {
-            const msgs = await telegramService.getMessages(this.indexChannel, {
-                minId: Math.max(0, startMsgId - 1),
+            const queryOptions = {
                 maxId: endMsgId,
                 limit: 100,
-            });
+            };
+            if (startMsgId && startMsgId > 0) {
+                queryOptions.minId = Math.max(0, startMsgId - 1);
+            }
+
+            const msgs = await telegramService.getMessages(this.indexChannel, queryOptions);
 
             if (msgs && msgs.length > 0) {
                 const ids = msgs.map((m) => m.id).filter((id) => id !== endMsgId);
-                await telegramService.deleteMessages(this.indexChannel, ids);
+                if (ids.length > 0) {
+                    await telegramService.deleteMessages(this.indexChannel, ids);
+                }
             }
         } catch (err) {
             console.error('Purge error:', err.message);
