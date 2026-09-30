@@ -5,6 +5,15 @@
  * Run: node generate-session.js
  */
 
+// Suppress Node.js experimental webstorage warning triggered by GramJS store2 dependency
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+    if (warning.name === 'Warning' && warning.message && warning.message.includes('localstorage-file')) {
+        return;
+    }
+    console.warn(warning);
+});
+
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const readline = require('readline');
@@ -28,20 +37,22 @@ async function main() {
     console.log('       TeleDrive MTProto Session Generator (GramJS)     ');
     console.log('========================================================\n');
 
-    let apiId = process.env.API_ID;
-    let apiHash = process.env.API_HASH;
+    let apiId = (process.env.API_ID || '').trim();
+    let apiHash = (process.env.API_HASH || '').trim();
 
-    if (!apiId || apiId === '') {
+    while (!apiId || isNaN(parseInt(apiId, 10))) {
         apiId = await askQuestion('Enter your Telegram API_ID (from https://my.telegram.org): ');
+        if (!apiId || isNaN(parseInt(apiId, 10))) {
+            console.log('⚠️  Please enter a valid numeric API_ID (e.g., 12345678).');
+        }
     }
-    if (!apiHash || apiHash === '') {
-        apiHash = await askQuestion('Enter your Telegram API_HASH (from https://my.telegram.org): ');
-    }
-
     const parsedApiId = parseInt(apiId, 10);
-    if (isNaN(parsedApiId)) {
-        console.error('❌ Error: API_ID must be a valid integer.');
-        process.exit(1);
+
+    while (!apiHash) {
+        apiHash = await askQuestion('Enter your Telegram API_HASH (from https://my.telegram.org): ');
+        if (!apiHash) {
+            console.log('⚠️  API_HASH cannot be empty.');
+        }
     }
 
     console.log('\nConnecting to Telegram MTProto servers...');

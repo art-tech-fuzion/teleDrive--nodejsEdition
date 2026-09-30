@@ -41,7 +41,7 @@ const uploadStorage = multer.diskStorage({
 const uploadMiddleware = multer({
     storage: uploadStorage,
     limits: {
-        fileSize: 2.1 * 1024 * 1024 * 1024, // 2.1GB per chunk/part limit
+        fileSize: Math.floor(2.1 * 1024 * 1024 * 1024), // 2.1GB per chunk/part limit
     }
 });
 
@@ -59,7 +59,7 @@ const directUploadStorage = multer.diskStorage({
 const directUploadMiddleware = multer({
     storage: directUploadStorage,
     limits: {
-        fileSize: 2.1 * 1024 * 1024 * 1024, // 2.1GB max single upload limit
+        fileSize: Math.floor(2.1 * 1024 * 1024 * 1024), // 2.1GB max single upload limit
     }
 });
 

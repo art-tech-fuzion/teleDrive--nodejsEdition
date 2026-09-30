@@ -6,13 +6,16 @@
 # Environment & Secrets (Never commit credentials)
 # ------------------------------------------------------------------------------
 .env
+.env.*
 .env.local
 .env.development
 .env.test
 .env.production
 .env.*.local
+**/.env*
 *.session
 *.session-journal
+**/*.session*
 
 # ------------------------------------------------------------------------------
 # Dependencies
