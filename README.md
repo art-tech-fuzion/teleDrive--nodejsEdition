@@ -1,4 +1,4 @@
-# 🚀 TeleDrive — Zero-Database Telegram Cloud Drive (Node.js + MTProto) FM
+# 🚀 TeleDrive — Zero-Database Telegram Cloud Drive (Node.js + MTProto)
 
 > **Developed & Maintained by [Rahul Kumar](https://github.com/rahulkumar), Owner of Art-Tech Fuzion**
 
