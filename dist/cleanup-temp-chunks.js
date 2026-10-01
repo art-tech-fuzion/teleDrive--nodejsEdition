@@ -61,7 +61,7 @@ function runTempChunksCleanup() {
     const now = Date.now();
     console.log(`\n========================================================`);
     console.log(`🧹 [TempCleaner] Starting temp chunk directory scan...`);
-    console.log(`📂 Target Directory: ${TEMP_DIR}`);
+    console.log(`📂 Target Directory: ./${path.basename(TEMP_DIR)}`);
     console.log(`⏱️  Age Threshold: ${MAX_CHUNK_AGE_SECONDS === 0 ? 'PURGE ALL (0s)' : `${MAX_CHUNK_AGE_SECONDS} seconds (${(MAX_CHUNK_AGE_SECONDS / 60).toFixed(1)} mins)`}`);
     console.log(`========================================================`);
 

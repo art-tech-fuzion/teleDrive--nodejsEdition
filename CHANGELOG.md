@@ -4,6 +4,23 @@ All notable changes to the TeleDrive project will be documented in this file.
 
 ---
 
+## [4.1.1] - 2026-10-02
+
+### 🧹 Automated Temp Chunk Cleaner & Server Path Masking
+1. **Automated Background Purge Engine (`cleanup-temp-chunks.js`)**:
+   - Implemented daemon-mode automated background cleanup scanning for temporary upload chunk directories (`temp_chunks`).
+   - Added inner-file timestamp inspection (`fs.statSync`) to accurately measure folder age based on the last written chunk rather than folder creation time.
+   - Prevents disk space leakage on server environments (Hostinger / cPanel / Linux).
+
+2. **Hostinger / Passenger Module Lifecycle Integration (`src/services/tempCleaner.js`)**:
+   - Placed `tempCleaner.init()` at server top-level scope in `server.js` so background cleanup activates seamlessly under both standard CLI (`node server.js`) and Passenger application servers.
+   - Added single-instance execution protection (`isStarted` guard) to prevent duplicate `setInterval` timers on module reload.
+
+3. **Log Security & Information Leak Shielding**:
+   - Masked internal absolute server path references in cleanup log output (`./temp_chunks`), eliminating directory structure exposure in server logs.
+
+---
+
 ## [3.0.0] - 2026-10-01
 
 ### 🚀 Major Highlights

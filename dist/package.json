@@ -1,6 +1,6 @@
 {
   "name": "teledrive-nodejs",
-  "version": "3.0.0",
+  "version": "4.1.1",
   "description": "High-performance, Zero-Database Cloud Drive powered by Telegram MTProto (GramJS) with 2GB+ multipart streaming",
   "main": "server.js",
   "scripts": {
