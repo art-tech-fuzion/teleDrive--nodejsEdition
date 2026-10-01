@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "build": "echo 'Production build ready'",
     "generate-session": "node --no-warnings generate-session.js",
+    "clean-temp": "node cleanup-temp-chunks.js",
     "test": "node -e \"console.log('Testing configuration...'); require('./src/config'); console.log('Config OK');\""
   },
   "keywords": [

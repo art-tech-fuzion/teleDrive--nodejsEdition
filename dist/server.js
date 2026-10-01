@@ -10,6 +10,7 @@ const apiRoutes = require('./src/routes/api');
 const viewRoutes = require('./src/routes/views');
 const telegramService = require('./src/services/telegram');
 const storageEngine = require('./src/services/storageEngine');
+const tempCleaner = require('./src/services/tempCleaner');
 
 const app = express();
 
@@ -197,6 +198,7 @@ if (require.main === module) {
             console.log('⚠️  Notice: Telegram MTProto credentials are not fully configured yet in .env');
             console.log('👉 Run `npm run generate-session` to generate your Telegram STRING_SESSION.');
         }
+
         console.log('========================================================\n');
     });
 
@@ -204,5 +206,7 @@ if (require.main === module) {
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
 }
+
+tempCleaner.init();
 
 module.exports = app;
