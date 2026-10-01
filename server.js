@@ -232,10 +232,10 @@ if (require.main === module) {
         console.log('========================================================\n');
     });
 
-    // Disable socket timeouts for large file uploads & MTProto chunk streaming
+    // Configure Keep-Alive timeouts to prevent connection drops during file downloads
     server.timeout = 0;
-    server.keepAliveTimeout = 650000; // 10+ minutes
-    server.headersTimeout = 660000;
+    server.keepAliveTimeout = 65000; // 65 seconds
+    server.headersTimeout = 66000; // 66 seconds
 }
 
 module.exports = app;

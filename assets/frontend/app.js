@@ -1084,145 +1084,23 @@ document.addEventListener("DOMContentLoaded", () => {
     bulkDeleteBtn.onclick = handleBulkDelete;
   }
 
-  // 13. Controlled Streaming Download with Progress Modal & Cancel
-  async function startControlledDownload(fileItem) {
-    const controller = new AbortController();
-    const signal = controller.signal;
+  // 13. Direct Native Browser Download Trigger
+  function startControlledDownload(fileItem) {
+    if (!fileItem || !fileItem.id) return;
+    const downloadUrl = `/api/index.php?action=files.download&id=${encodeURIComponent(fileItem.id)}`;
 
-    // Create and show download status modal
-    const overlay = document.createElement("div");
-    overlay.className = "td-preview-modal";
-    overlay.style.cssText = `
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(6px);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 9999;
-        `;
+    // Trigger native browser download directly via a hidden anchor element
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = fileItem.name || "download";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+    }, 1000);
 
-    const box = document.createElement("div");
-    box.className = "td-download-modal-box";
-
-    box.innerHTML = `
-            <div class="td-download-modal-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                <div class="td-spinner" style="width:24px; height:24px; border:2px solid rgba(0,212,255,0.2); border-top-color:var(--color-primary); border-radius:50%; animation:tdSpin 0.8s linear infinite;"></div>
-                <div style="flex:1; min-width:0;">
-                    <h3 class="td-download-modal-title" style="font-size:16px; font-weight:600; color:var(--text-main);">Downloading File</h3>
-                    <p class="td-download-modal-filename" style="font-size:12px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(fileItem.name)}">${escapeHtml(fileItem.name)}</p>
-                </div>
-            </div>
-            <div class="td-download-progress-bar" style="height:6px; background:var(--bg-body); border-radius:3px; overflow:hidden; margin-bottom:12px;">
-                <div class="td-download-progress-fill" id="td-dl-progress-fill" style="height:100%; width:0%; background:var(--color-primary); transition:width 0.1s linear;"></div>
-            </div>
-            <div class="td-download-modal-meta" style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary);">
-                <span class="td-download-modal-percent" id="td-dl-percent">0%</span>
-                <span class="td-download-modal-size" id="td-dl-size">0 B / ${formatBytes(fileItem.size)}</span>
-                <span class="td-download-modal-speed" id="td-dl-speed">Starting...</span>
-            </div>
-            <div style="display:flex; justify-content:flex-end; margin-top:16px;">
-                <button id="td-cancel-download-btn" style="
-                    background: transparent; border: 1px solid var(--border-color);
-                    color: var(--color-danger, #ef4444); padding: 6px 14px;
-                    border-radius: var(--radius-sm, 6px); cursor: pointer; font-size:12px; font-weight:500;
-                    transition: all 0.2s ease;
-                ">Cancel Download</button>
-            </div>
-        `;
-
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-
-    const dlFill = box.querySelector("#td-dl-progress-fill");
-    const dlPercent = box.querySelector("#td-dl-percent");
-    const dlSize = box.querySelector("#td-dl-size");
-    const dlSpeed = box.querySelector("#td-dl-speed");
-
-    let isCancelled = false;
-    box.querySelector("#td-cancel-download-btn").onclick = () => {
-      isCancelled = true;
-      controller.abort();
-      overlay.remove();
-      TeleDrive.toast("Download cancelled.", "warning");
-    };
-
-    try {
-      const downloadUrl = `/api/index.php?action=files.download&id=${encodeURIComponent(fileItem.id)}`;
-      const response = await fetch(downloadUrl, { signal });
-
-      if (!response.ok) {
-        let errorMsg = `HTTP ${response.status}`;
-        try {
-          const errData = await response.json();
-          if (errData && errData.error) errorMsg = errData.error;
-        } catch (e) {}
-        throw new Error(errorMsg);
-      }
-
-      const contentLengthHeader = response.headers.get("Content-Length");
-      const totalBytes = contentLengthHeader
-        ? parseInt(contentLengthHeader, 10)
-        : fileItem.size || 0;
-
-      const reader = response.body.getReader();
-      const chunks = [];
-      let receivedBytes = 0;
-      const startTime = Date.now();
-
-      while (true) {
-        if (isCancelled) break;
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        chunks.push(value);
-        receivedBytes += value.length;
-
-        const percent =
-          totalBytes > 0
-            ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100))
-            : 0;
-        dlFill.style.width = `${percent}%`;
-        dlPercent.textContent = `${percent}%`;
-        dlSize.textContent =
-          totalBytes > 0
-            ? `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`
-            : `${formatBytes(receivedBytes)}`;
-
-        const elapsedSec = (Date.now() - startTime) / 1000;
-        if (elapsedSec > 0.4 && receivedBytes > 0) {
-          const speed = receivedBytes / elapsedSec;
-          dlSpeed.textContent = `${formatBytes(speed)}/s`;
-        }
-      }
-
-      if (!isCancelled) {
-        dlFill.style.width = "100%";
-        dlPercent.textContent = "100%";
-        dlSpeed.textContent = "Finalizing...";
-
-        const blob = new Blob(chunks, {
-          type: fileItem.mime_type || "application/octet-stream",
-        });
-        const blobUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = fileItem.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(blobUrl);
-
-        setTimeout(() => {
-          overlay.remove();
-          TeleDrive.toast(`Download complete: ${fileItem.name}`, "success");
-        }, 400);
-      }
-    } catch (err) {
-      overlay.remove();
-      if (!isCancelled) {
-        console.error("Download error:", err);
-        TeleDrive.toast(`Download failed: ${err.message}`, "error");
-      }
-    }
+    TeleDrive.toast(`Starting download: ${fileItem.name}`, "info");
   }
 
   // 14. File Upload Trigger & Input Handlers
@@ -1362,10 +1240,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function uploadSingleFile(file) {
-    const TWO_GB_LIMIT = 1.95 * 1024 * 1024 * 1024; // 1.95 GB
-    const isMultiPart = file.size > TWO_GB_LIMIT;
+    // Files over 20MB are chunked into 15MB slices to bypass server/proxy HTTP 413 limits
+    const DIRECT_UPLOAD_LIMIT = 20 * 1024 * 1024; // 20 MB
+    const isChunked = file.size > DIRECT_UPLOAD_LIMIT;
     let isCancelled = false;
     const activeXhrs = new Set();
+    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
 
     // Create UI Item in queue with Cancel button, Percentage, Size & Status indicators
     const qItem = document.createElement("div");
@@ -1400,6 +1280,15 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       activeXhrs.clear();
       qItem.remove();
+
+      try {
+        const cancelData = new FormData();
+        cancelData.append("action", "files.cancel_upload");
+        cancelData.append("_csrf", getCsrfToken());
+        cancelData.append("upload_id", uploadId);
+        fetch("/api/index.php?action=files.cancel_upload", { method: "POST", body: cancelData });
+      } catch (e) {}
+
       TeleDrive.toast(`Upload cancelled: ${file.name}`, "warning");
       if (queueItems.children.length === 0) {
         uploadQueue.style.display = "none";
@@ -1409,8 +1298,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const startTime = Date.now();
 
     try {
-      if (!isMultiPart) {
-        const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      if (!isChunked) {
+        // Direct single upload for small files (<= 20MB)
         let progressInterval = null;
 
         await new Promise((resolve, reject) => {
@@ -1431,7 +1320,6 @@ document.addEventListener("DOMContentLoaded", () => {
               const pData = pJson.progress || (pJson.data && pJson.data.progress);
               if (pData && pData.status === "uploading_telegram") {
                 const tgPercent = pData.percent || 0;
-                // Combine: 50% for browser buffer + 50% for telegram upload
                 const totalPercent = Math.min(99, 50 + Math.round(tgPercent * 0.49));
                 fillBar.style.width = `${totalPercent}%`;
                 percentLabel.textContent = `${totalPercent}%`;
@@ -1446,7 +1334,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 percentLabel.textContent = `99%`;
                 speedLabel.textContent = `Saving metadata...`;
               } else if (pData && pData.status === "completed" && pData.item && !isFinished) {
-                // If Telegram completed before XHR fired load
                 isFinished = true;
                 if (progressInterval) clearInterval(progressInterval);
                 activeXhrs.delete(xhr);
@@ -1463,7 +1350,6 @@ document.addEventListener("DOMContentLoaded", () => {
           xhr.upload.onprogress = (e) => {
             if (isCancelled || isFinished) return;
             if (e.lengthComputable && e.loaded <= file.size) {
-              // Browser upload represents first 50% of full progress
               const localPercent = Math.min(50, Math.round((e.loaded / file.size) * 50));
               fillBar.style.width = `${localPercent}%`;
               percentLabel.textContent = `${localPercent}%`;
@@ -1502,7 +1388,6 @@ document.addEventListener("DOMContentLoaded", () => {
                   return;
                 }
               } catch (parseErr) {
-                // Fallback check: Did Telegram complete in progress tracker?
                 try {
                   const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
                   const checkJson = await checkRes.json();
@@ -1521,22 +1406,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
               }
             } else {
-              // Check if upload actually completed on Telegram before rejecting
-              try {
-                const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
-                const checkJson = await checkRes.json();
-                const pData = checkJson.progress || (checkJson.data && checkJson.data.progress);
-                if (pData && (pData.status === "completed" || pData.item)) {
-                  isFinished = true;
-                  if (pData.item) {
-                    state.items.unshift(pData.item);
-                    renderItems();
-                  }
-                  resolve({ success: true, item: pData.item });
-                  return;
-                }
-              } catch (e) {}
-
               let errorMsg = `HTTP error ${xhr.status}`;
               try {
                 const errJson = JSON.parse(xhr.responseText);
@@ -1548,27 +1417,10 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           };
 
-          xhr.onerror = async () => {
+          xhr.onerror = () => {
             if (isFinished) return;
             if (progressInterval) clearInterval(progressInterval);
             activeXhrs.delete(xhr);
-
-            // Double check progress tracker in case network dropped right after upload to Telegram
-            try {
-              const checkRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
-              const checkJson = await checkRes.json();
-              const pData = checkJson.progress || (checkJson.data && checkJson.data.progress);
-              if (pData && (pData.status === "completed" || pData.item)) {
-                isFinished = true;
-                if (pData.item) {
-                  state.items.unshift(pData.item);
-                  renderItems();
-                }
-                resolve({ success: true, item: pData.item });
-                return;
-              }
-            } catch (e) {}
-
             reject(new Error("Network error during direct upload"));
           };
 
@@ -1588,74 +1440,108 @@ document.addEventListener("DOMContentLoaded", () => {
           formData.append("file", file);
 
           xhr.open("POST", "/api/upload", true);
-          xhr.timeout = 0; // Prevent client socket timeout
+          xhr.timeout = 0;
           xhr.setRequestHeader("X-CSRF-Token", getCsrfToken());
           xhr.send(formData);
         });
       } else {
-        // --- 2. Multi-Part Volumes ONLY for Large Files > 2GB (1.9GB Slices) ---
-        const volumeSize = Math.floor(1.9 * 1024 * 1024 * 1024);
-        const totalParts = Math.ceil(file.size / volumeSize);
-        const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+        // --- Chunked Upload for Files > 20MB (25MB Slices for High-Speed Throughput) ---
+        const CHUNK_SIZE = 25 * 1024 * 1024; // 25 MB chunks
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-        for (let partIdx = 0; partIdx < totalParts && !isCancelled; partIdx++) {
-          const start = partIdx * volumeSize;
-          const end = Math.min(start + volumeSize, file.size);
-          const partBlob = file.slice(start, end);
+        for (let chunkIdx = 0; chunkIdx < totalChunks && !isCancelled; chunkIdx++) {
+          const start = chunkIdx * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunkBlob = file.slice(start, end);
 
-          await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            activeXhrs.add(xhr);
+          // Upload chunk with automatic retry (up to 3 attempts)
+          let chunkSuccess = false;
+          let lastChunkError = null;
 
-            xhr.upload.onprogress = (e) => {
-              if (isCancelled) return;
-              if (e.lengthComputable) {
-                const currentLoaded = (partIdx * volumeSize) + e.loaded;
-                const percent = Math.min(99, Math.round((currentLoaded / file.size) * 100));
-                fillBar.style.width = `${percent}%`;
-                percentLabel.textContent = `${percent}% (Part ${partIdx + 1}/${totalParts})`;
-                sizeLabel.textContent = `${formatBytes(currentLoaded)} / ${formatBytes(file.size)}`;
+          for (let attempt = 1; attempt <= 3 && !chunkSuccess && !isCancelled; attempt++) {
+            try {
+              await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                activeXhrs.add(xhr);
 
-                const elapsedSec = (Date.now() - startTime) / 1000;
-                if (elapsedSec > 0.4) {
-                  const speedBytesPerSec = currentLoaded / elapsedSec;
-                  speedLabel.textContent = `${formatBytes(speedBytesPerSec)}/s`;
-                }
+                xhr.upload.onprogress = (e) => {
+                  if (isCancelled) return;
+                  if (e.lengthComputable) {
+                    const currentLoaded = (chunkIdx * CHUNK_SIZE) + e.loaded;
+                    // First 50% for uploading slices to server buffer
+                    const localPercent = Math.min(50, Math.round((currentLoaded / file.size) * 50));
+                    fillBar.style.width = `${localPercent}%`;
+                    percentLabel.textContent = `${localPercent}% (Part ${chunkIdx + 1}/${totalChunks})`;
+                    sizeLabel.textContent = `${formatBytes(currentLoaded)} / ${formatBytes(file.size)}`;
+
+                    const elapsedSec = (Date.now() - startTime) / 1000;
+                    if (elapsedSec > 0.3) {
+                      const speedBytesPerSec = currentLoaded / elapsedSec;
+                      speedLabel.textContent = `${formatBytes(speedBytesPerSec)}/s (Buffering)`;
+                    } else {
+                      speedLabel.textContent = "Uploading parts...";
+                    }
+                  }
+                };
+
+                xhr.onload = () => {
+                  activeXhrs.delete(xhr);
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                      const resJson = JSON.parse(xhr.responseText);
+                      if (resJson && resJson.success) {
+                        resolve();
+                        return;
+                      }
+                      reject(new Error(resJson?.error || resJson?.message || `Part ${chunkIdx + 1} upload failed`));
+                    } catch (e) {
+                      resolve();
+                    }
+                  } else {
+                    reject(new Error(`HTTP error ${xhr.status} on part ${chunkIdx + 1}`));
+                  }
+                };
+
+                xhr.onerror = () => {
+                  activeXhrs.delete(xhr);
+                  reject(new Error(`Network error on part ${chunkIdx + 1}`));
+                };
+
+                xhr.onabort = () => {
+                  activeXhrs.delete(xhr);
+                  reject(new Error("Upload aborted"));
+                };
+
+                const formData = new FormData();
+                formData.append("action", "files.upload_chunk");
+                formData.append("_csrf", getCsrfToken());
+                formData.append("upload_id", uploadId);
+                formData.append("chunk_index", chunkIdx);
+                formData.append("total_chunks", totalChunks);
+                formData.append("filename", file.name);
+                formData.append("chunk", chunkBlob, file.name);
+
+                xhr.open("POST", "/api/index.php?action=files.upload_chunk", true);
+                xhr.setRequestHeader("X-CSRF-Token", getCsrfToken());
+                xhr.send(formData);
+              });
+              chunkSuccess = true;
+            } catch (err) {
+              lastChunkError = err;
+              if (attempt < 3 && !isCancelled) {
+                await new Promise((r) => setTimeout(r, 1000 * attempt));
               }
-            };
+            }
+          }
 
-            xhr.onload = () => {
-              activeXhrs.delete(xhr);
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-              } else {
-                reject(new Error(`Failed to upload part ${partIdx + 1}`));
-              }
-            };
-
-            xhr.onerror = () => {
-              activeXhrs.delete(xhr);
-              reject(new Error(`Network error on part ${partIdx + 1}`));
-            };
-
-            const formData = new FormData();
-            formData.append("action", "files.upload_chunk");
-            formData.append("_csrf", getCsrfToken());
-            formData.append("upload_id", uploadId);
-            formData.append("chunk_index", partIdx);
-            formData.append("total_chunks", totalParts);
-            formData.append("filename", file.name);
-            formData.append("chunk", partBlob, file.name);
-
-            xhr.open("POST", "/api/index.php?action=files.upload_chunk", true);
-            xhr.setRequestHeader("X-CSRF-Token", getCsrfToken());
-            xhr.send(formData);
-          });
+          if (!chunkSuccess && !isCancelled) {
+            throw lastChunkError || new Error(`Failed to upload part ${chunkIdx + 1}`);
+          }
         }
 
         if (isCancelled) return;
 
-        // Finalize multipart upload
+        // 1. Trigger asynchronous background finalization on server
         const completeFormData = new FormData();
         completeFormData.append("action", "files.complete_upload");
         completeFormData.append("_csrf", getCsrfToken());
@@ -1663,22 +1549,83 @@ document.addEventListener("DOMContentLoaded", () => {
         completeFormData.append("filename", file.name);
         completeFormData.append("size", file.size);
         completeFormData.append("parent_id", state.currentFolderId);
-        completeFormData.append("total_chunks", totalParts);
+        completeFormData.append("total_chunks", totalChunks);
 
         const completeRes = await apiFetch("/api/index.php?action=files.complete_upload", {
           method: "POST",
           body: completeFormData,
         });
+
         const completeResult = await completeRes.json();
-        if (completeResult.success) {
-          const newItem = completeResult.item || (completeResult.data && completeResult.data.item);
-          if (newItem) {
-            state.items.unshift(newItem);
-            renderItems();
-          }
-        } else {
-          throw new Error(completeResult.error || "Failed to finalize multipart upload");
+        if (!completeResult.success) {
+          throw new Error(completeResult.error || "Failed to start file assembly on server");
         }
+
+        // 2. Poll server for live Telegram MTProto upload progress until complete or error
+        await new Promise((resolve, reject) => {
+          let pollFailures = 0;
+
+          const progressInterval = setInterval(async () => {
+            if (isCancelled) {
+              clearInterval(progressInterval);
+              reject(new Error("Upload cancelled"));
+              return;
+            }
+
+            try {
+              const pRes = await fetch(`/api/index.php?action=files.upload_progress&upload_id=${encodeURIComponent(uploadId)}`);
+              const pJson = await pRes.json();
+              const pData = pJson.progress || (pJson.data && pJson.data.progress);
+
+              if (pData) {
+                pollFailures = 0; // Reset network failure counter
+
+                if (pData.status === "assembling") {
+                  fillBar.style.width = `50%`;
+                  percentLabel.textContent = `50%`;
+                  speedLabel.textContent = `Assembling file parts on server...`;
+                } else if (pData.status === "uploading_telegram") {
+                  const tgPercent = pData.percent || 0;
+                  const totalPercent = Math.min(99, 50 + Math.round(tgPercent * 0.49));
+                  fillBar.style.width = `${totalPercent}%`;
+                  percentLabel.textContent = `${totalPercent}%`;
+                  sizeLabel.textContent = `${formatBytes(pData.loaded || 0)} / ${formatBytes(file.size)}`;
+                  if (pData.speed > 0) {
+                    speedLabel.textContent = `${formatBytes(pData.speed)}/s (Telegram Cloud)`;
+                  } else {
+                    speedLabel.textContent = `Uploading to Telegram Cloud...`;
+                  }
+                } else if (pData.status === "indexing") {
+                  fillBar.style.width = `99%`;
+                  percentLabel.textContent = `99%`;
+                  speedLabel.textContent = `Saving metadata to Index Channel...`;
+                } else if (pData.status === "completed" && pData.item) {
+                  clearInterval(progressInterval);
+                  const newItem = pData.item;
+                  if (newItem && !state.items.some((it) => it.id === newItem.id)) {
+                    state.items.unshift(newItem);
+                    renderItems();
+                  }
+                  if (pData.needs_purge) {
+                    state.needsIndexPurge = true;
+                  }
+                  resolve(newItem);
+                  return;
+                } else if (pData.status === "failed") {
+                  clearInterval(progressInterval);
+                  reject(new Error(pData.error || "Upload failed on Telegram Storage"));
+                  return;
+                }
+              }
+            } catch (err) {
+              pollFailures++;
+              if (pollFailures > 12) {
+                clearInterval(progressInterval);
+                reject(new Error("Lost connection to server progress tracker"));
+              }
+            }
+          }, 400);
+        });
       }
 
       if (isCancelled) return;

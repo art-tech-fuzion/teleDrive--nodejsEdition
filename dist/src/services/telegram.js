@@ -1,6 +1,7 @@
 const { TelegramClient, Api } = require("teleproto");
 const { StringSession } = require("teleproto/sessions");
 const { CustomFile } = require("teleproto/client/uploads");
+const bigInt = require("big-integer");
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
@@ -41,6 +42,24 @@ class TelegramService {
           autoReconnect: true,
           timeout: 30000,
           floodSleepThreshold: 120,
+          downloadPool: {
+            maxSessions: 16,
+            sessions: 8,
+            inflightPerDc: 16,
+            partSize: 512 * 1024,
+            download: {
+              startSessions: 8,
+              maxSessions: 16,
+              startWindow: 8 * 1024 * 1024,
+              maxWindow: 16 * 1024 * 1024,
+            },
+            upload: {
+              startSessions: 8,
+              maxSessions: 16,
+              startWindow: 8 * 1024 * 1024,
+              maxWindow: 16 * 1024 * 1024,
+            },
+          },
         },
       );
 
@@ -187,7 +206,7 @@ class TelegramService {
     const fileSize = stats.size;
 
     const workers =
-      fileSize > 50 * 1024 * 1024 ? 6 : fileSize > 5 * 1024 * 1024 ? 4 : 2;
+      fileSize > 50 * 1024 * 1024 ? 4 : fileSize > 5 * 1024 * 1024 ? 3 : 2;
 
     let sentMessage = null;
     let lastErr = null;
@@ -196,6 +215,7 @@ class TelegramService {
       try {
         sentMessage = await client.sendFile(storageChannel, {
           file: filePath,
+          fileSize: fileSize,
           caption: caption || `TeleDrive: ${filename}`,
           forceDocument: true,
           workers,
@@ -218,12 +238,12 @@ class TelegramService {
           err.message.match(/FLOOD_WAIT_(\d+)|wait of (\d+) seconds/i);
         const waitSecs = waitMatch
           ? parseInt(waitMatch[1] || waitMatch[2], 10)
-          : attempt * 2;
+          : attempt * 3;
 
         if (attempt < 3) {
-          await new Promise((r) =>
-            setTimeout(r, Math.min(waitSecs * 1000, 30000)),
-          );
+          const delay = Math.min(Math.max(waitSecs, attempt * 3) * 1000, 30000);
+          console.warn(`[TelegramService] Retrying upload in ${delay / 1000}s...`);
+          await new Promise((r) => setTimeout(r, delay));
         }
       }
     }
@@ -307,21 +327,261 @@ class TelegramService {
       throw new Error(`Message ${messageId} does not contain media.`);
     }
 
-    const doc = message.media.document;
-    const dcId = doc?.dcId || message.media.dcId;
+    const doc = message.media?.document || message.media;
+    const dcId = doc?.dcId || message.media?.dcId;
+    const rawSize = doc?.size || message.media?.size || 0;
+    const fileSizeBigInt = bigInt(rawSize ? rawSize.toString() : "0");
 
-    const chunkSize = 1024 * 1024;
-    for await (const chunk of client.iterDownload(message, {
-      requestSize: chunkSize,
-      dcId: dcId,
-    })) {
-      if (res.writableEnded || res.destroyed) {
-        break;
+    let inputLocation;
+    if (doc?.id && doc?.accessHash && doc?.fileReference) {
+      inputLocation = new Api.InputDocumentFileLocation({
+        id: doc.id,
+        accessHash: doc.accessHash,
+        fileReference: doc.fileReference,
+        thumbSize: "",
+      });
+    } else {
+      inputLocation = message.media || message;
+    }
+
+    const writableAdapter = {
+      write(chunk) {
+        if (res.writableEnded || res.destroyed) {
+          return false;
+        }
+        const canWrite = res.write(chunk);
+        if (!canWrite && !res.writableEnded && !res.destroyed) {
+          return new Promise((resolve) => res.once("drain", resolve));
+        }
+        return true;
+      },
+      close() {
+
+      },
+    };
+
+    const abortController = new AbortController();
+    const onDisconnect = () => abortController.abort();
+    res.on("close", onDisconnect);
+
+    try {
+
+      await client.downloadFile(inputLocation, {
+        outputFile: writableAdapter,
+        partSizeKb: 512,
+        fileSize: fileSizeBigInt,
+        dcId: dcId,
+        signal: abortController.signal,
+      });
+    } catch (err) {
+      if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
+        return;
       }
-      const canWriteMore = res.write(chunk);
-      if (!canWriteMore) {
-        await new Promise((resolve) => res.once("drain", resolve));
+      console.warn(
+        `[TelegramService] Parallel streaming fallback for message ${messageId}:`,
+        err.message,
+      );
+
+      for await (const chunk of client.iterDownload(inputLocation, {
+        requestSize: 512 * 1024,
+        dcId: dcId,
+      })) {
+        if (res.writableEnded || res.destroyed) break;
+        const canWrite = res.write(chunk);
+        if (!canWrite) {
+          await new Promise((resolve) => res.once("drain", resolve));
+        }
       }
+    } finally {
+      res.removeListener("close", onDisconnect);
+    }
+  }
+
+  async downloadMediaPartParallel(client, inputLocation, rangeStart, rangeEnd, chunkSize, res) {
+    const PART_SIZE = 512 * 1024;
+    const firstPartIndex = Math.floor(rangeStart / PART_SIZE);
+    const lastPartIndex = Math.floor((rangeEnd > rangeStart ? rangeEnd : rangeStart) / PART_SIZE);
+
+    const partIndices = [];
+    for (let p = firstPartIndex; p <= lastPartIndex; p++) {
+      partIndices.push(p);
+    }
+
+    const CONCURRENCY = 4;
+    const partsMap = new Map();
+    let nextPartToWrite = firstPartIndex;
+    let hasError = null;
+
+    const flushParts = async () => {
+      while (partsMap.has(nextPartToWrite)) {
+        if (res.writableEnded || res.destroyed) break;
+        const partIdx = nextPartToWrite;
+        const bytes = partsMap.get(partIdx);
+        partsMap.delete(partIdx);
+
+        if (bytes && bytes.length > 0) {
+          const partOffset = partIdx * PART_SIZE;
+          const sliceStart = Math.max(0, rangeStart - partOffset);
+          const sliceEnd = Math.min(bytes.length, (rangeEnd - partOffset) + 1);
+
+          if (sliceStart < sliceEnd) {
+            const slice = bytes.subarray(sliceStart, sliceEnd);
+            const canWrite = res.write(slice);
+            if (!canWrite && !res.writableEnded && !res.destroyed) {
+              await new Promise((resolve) => res.once("drain", resolve));
+            }
+          }
+        }
+        nextPartToWrite++;
+      }
+    };
+
+    let queueIdx = 0;
+    const worker = async () => {
+      while (queueIdx < partIndices.length && !hasError) {
+        if (res.writableEnded || res.destroyed) break;
+        const partIdx = partIndices[queueIdx++];
+        const offset = partIdx * PART_SIZE;
+
+        try {
+          let bytes = null;
+          let retries = 3;
+          while (retries > 0 && !bytes && !res.writableEnded && !res.destroyed) {
+            try {
+              const fileResult = await client.invoke(
+                new Api.upload.GetFile({
+                  location: inputLocation,
+                  offset: bigInt(offset),
+                  limit: PART_SIZE,
+                  precise: true,
+                })
+              );
+              if (fileResult && fileResult.bytes) {
+                bytes = fileResult.bytes;
+              }
+            } catch (err) {
+              retries--;
+              if (retries === 0) throw err;
+              await new Promise((r) => setTimeout(r, 200));
+            }
+          }
+
+          partsMap.set(partIdx, bytes || Buffer.alloc(0));
+          await flushParts();
+        } catch (err) {
+          hasError = err;
+          console.warn(`[TelegramService] Api.upload.GetFile worker warning for part ${partIdx}:`, err.message);
+          try {
+            const fallbackBuf = await client.downloadFile(inputLocation, {
+              offset: bigInt(offset),
+              limit: PART_SIZE,
+              partSizeKb: 512,
+            });
+            partsMap.set(partIdx, fallbackBuf || Buffer.alloc(0));
+            await flushParts();
+            hasError = null;
+          } catch (fallbackErr) {
+            console.error(`[TelegramService] Fallback failed for part ${partIdx}:`, fallbackErr.message);
+          }
+        }
+      }
+    };
+
+    const workers = [];
+    for (let w = 0; w < Math.min(CONCURRENCY, partIndices.length); w++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+    await flushParts();
+  }
+
+  async streamChunksToResponse(channelId, chunksToStream, res) {
+    if (!chunksToStream || chunksToStream.length === 0) return;
+    const client = await this.getClient();
+    const channel = await this.getEntity(channelId);
+
+    const normalizedChunks = chunksToStream.map((item) => {
+      if (typeof item === "object" && item !== null && item.message_id) {
+        return {
+          message_id: Number(item.message_id),
+          start: typeof item.start === "number" ? item.start : 0,
+          end: typeof item.end === "number" ? item.end : (item.size ? item.size - 1 : Infinity),
+          size: item.size || 0,
+        };
+      }
+      const id = Number(item);
+      return { message_id: id, start: 0, end: Infinity, size: 0 };
+    }).filter((c) => !isNaN(c.message_id));
+
+    const uniqueIds = Array.from(new Set(normalizedChunks.map((c) => c.message_id)));
+    const msgMap = new Map();
+
+    const BATCH_SIZE = 15;
+    for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+      if (res.writableEnded || res.destroyed) return;
+      const batchIds = uniqueIds.slice(i, i + BATCH_SIZE);
+      try {
+        const batchMsgs = await client.getMessages(channel, { ids: batchIds });
+        if (batchMsgs && Array.isArray(batchMsgs)) {
+          for (const msg of batchMsgs) {
+            if (msg && msg.id) {
+              msgMap.set(Number(msg.id), msg);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[TelegramService] Batch getMessages warning for IDs ${batchIds}:`, err.message);
+      }
+    }
+
+    const abortController = new AbortController();
+    const onDisconnect = () => abortController.abort();
+    res.on("close", onDisconnect);
+
+    try {
+      for (const chunkItem of normalizedChunks) {
+        if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
+          break;
+        }
+
+        let message = msgMap.get(chunkItem.message_id);
+        if (!message) {
+          try {
+            const single = await client.getMessages(channel, { ids: [chunkItem.message_id] });
+            if (single && single[0]) message = single[0];
+          } catch (e) {}
+        }
+        if (!message || !message.media) continue;
+
+        const doc = message.media?.document || message.media;
+        const rawSize = doc?.size || message.media?.size || chunkItem.size || 0;
+        const actualChunkSize = rawSize ? Number(rawSize) : chunkItem.size;
+        const rangeStart = Math.max(0, chunkItem.start);
+        const rangeEnd = Math.min(actualChunkSize > 0 ? actualChunkSize - 1 : chunkItem.end, chunkItem.end);
+
+        let inputLocation;
+        if (doc?.id && doc?.accessHash && doc?.fileReference) {
+          inputLocation = new Api.InputDocumentFileLocation({
+            id: doc.id,
+            accessHash: doc.accessHash,
+            fileReference: doc.fileReference,
+            thumbSize: "",
+          });
+        } else {
+          inputLocation = message.media || message;
+        }
+
+        await this.downloadMediaPartParallel(
+          client,
+          inputLocation,
+          rangeStart,
+          rangeEnd,
+          actualChunkSize,
+          res
+        );
+      }
+    } finally {
+      res.removeListener("close", onDisconnect);
     }
   }
 

@@ -322,7 +322,7 @@ async function handleAction(action, req, res) {
                     try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) {}
                 }
 
-                const batchThreshold = config.CHUNK_UPLOAD_BATCH_SIZE;
+                const batchThreshold = config.PART_SIZE_LIMIT || (1.9 * 1024 * 1024 * 1024);
                 let nextPart = state.next_part_index || 0;
                 let batchIdx = state.batch_index || 1;
 
@@ -348,17 +348,27 @@ async function handleAction(action, req, res) {
                         const batchFilename = `batch_${batchIdx}_${filename}`;
                         const batchPath = path.join(uploadSessionDir, batchFilename);
 
-                        const batchBuffers = [];
+                        const outStream = fs.createWriteStream(batchPath, { flags: 'w' });
                         for (const part of contiguousParts) {
                             if (fs.existsSync(part.path)) {
-                                batchBuffers.push(fs.readFileSync(part.path));
-                                try { fs.unlinkSync(part.path); } catch (e) {}
+                                await new Promise((resolve, reject) => {
+                                    const inStream = fs.createReadStream(part.path);
+                                    inStream.on('error', reject);
+                                    inStream.on('end', () => {
+                                        try { fs.unlinkSync(part.path); } catch (e) {}
+                                        resolve();
+                                    });
+                                    inStream.pipe(outStream, { end: false });
+                                });
                             }
                         }
+                        outStream.end();
+                        await new Promise((resolve, reject) => {
+                            outStream.on('finish', resolve);
+                            outStream.on('error', reject);
+                        });
 
-                        if (batchBuffers.length > 0) {
-                            fs.writeFileSync(batchPath, Buffer.concat(batchBuffers));
-
+                        if (fs.existsSync(batchPath) && fs.statSync(batchPath).size > 0) {
                             const uploadRes = await telegramService.uploadFileToStorage(
                                 batchPath,
                                 batchFilename,
@@ -408,95 +418,200 @@ async function handleAction(action, req, res) {
                 const fileSize = parseInt(req.body.size || '0', 10);
                 const totalChunks = parseInt(req.body.total_chunks || '1', 10);
 
+                if (!uploadId) {
+                    return Helpers.error(res, 'Invalid upload session ID.', 400);
+                }
+
                 const uploadSessionDir = path.join(config.TEMP_CHUNK_DIR, uploadId);
                 if (!fs.existsSync(uploadSessionDir)) {
+
+                    const currentProgress = uploadProgressTracker.get(uploadId);
+                    if (currentProgress && currentProgress.status === 'completed') {
+                        return Helpers.success(res, {
+                            status: 'completed',
+                            item: currentProgress.item,
+                            needs_purge: currentProgress.needs_purge,
+                        }, 'File uploaded and indexed successfully.');
+                    }
                     return Helpers.error(res, 'Upload session directory not found.', 400);
                 }
 
-                const stateFile = path.join(uploadSessionDir, 'session_state.json');
-                const chunksFile = path.join(uploadSessionDir, 'session_chunks.json');
-
-                let state = { next_part_index: 0, batch_index: 1 };
-                if (fs.existsSync(stateFile)) {
-                    try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) {}
+                const currentStatus = uploadProgressTracker.get(uploadId)?.status;
+                if (currentStatus === 'assembling' || currentStatus === 'uploading_telegram' || currentStatus === 'indexing') {
+                    return Helpers.success(res, {
+                        status: 'processing',
+                        upload_id: uploadId,
+                    }, 'Upload is being processed in background.');
                 }
 
-                let nextPart = state.next_part_index || 0;
-                let batchIdx = state.batch_index || 1;
+                uploadProgressTracker.set(uploadId, {
+                    status: 'assembling',
+                    percent: 50,
+                    loaded: 0,
+                    total: fileSize,
+                    speed: 0,
+                });
 
-                if (nextPart < totalChunks) {
-                    const tailFilename = `batch_${batchIdx}_${filename}`;
-                    const tailPath = path.join(uploadSessionDir, tailFilename);
-                    const tailBuffers = [];
+                Helpers.success(res, {
+                    status: 'processing',
+                    upload_id: uploadId,
+                }, 'Upload assembly and Telegram Cloud transfer started.');
 
-                    for (let i = nextPart; i < totalChunks; i++) {
-                        const pPath = path.join(uploadSessionDir, `part_${i}`);
-                        if (fs.existsSync(pPath)) {
-                            tailBuffers.push(fs.readFileSync(pPath));
-                            try { fs.unlinkSync(pPath); } catch (e) {}
+                (async () => {
+                    try {
+                        const stateFile = path.join(uploadSessionDir, 'session_state.json');
+                        const chunksFile = path.join(uploadSessionDir, 'session_chunks.json');
+
+                        let state = { next_part_index: 0, batch_index: 1 };
+                        if (fs.existsSync(stateFile)) {
+                            try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) {}
                         }
-                    }
 
-                    if (tailBuffers.length > 0) {
-                        fs.writeFileSync(tailPath, Buffer.concat(tailBuffers));
+                        let nextPart = state.next_part_index || 0;
+                        let batchIdx = state.batch_index || 1;
 
-                        const uploadRes = await telegramService.uploadFileToStorage(
-                            tailPath,
-                            tailFilename,
-                            `TeleDrive File: ${filename} (Part ${batchIdx})`
-                        );
+                        if (nextPart < totalChunks) {
+                            const tailFilename = `batch_${batchIdx}_${filename}`;
+                            const tailPath = path.join(uploadSessionDir, tailFilename);
 
-                        try { fs.unlinkSync(tailPath); } catch (e) {}
+                            const outStream = fs.createWriteStream(tailPath, { flags: 'w', highWaterMark: 1024 * 1024 });
+                            for (let i = nextPart; i < totalChunks; i++) {
+                                const pPath = path.join(uploadSessionDir, `part_${i}`);
+                                if (fs.existsSync(pPath)) {
+                                    await new Promise((resolve, reject) => {
+                                        const inStream = fs.createReadStream(pPath, { highWaterMark: 1024 * 1024 });
+                                        inStream.on('error', reject);
+                                        inStream.on('end', () => {
+                                            try { fs.unlinkSync(pPath); } catch (e) {}
+                                            resolve();
+                                        });
+                                        inStream.pipe(outStream, { end: false });
+                                    });
+                                }
+                            }
+                            outStream.end();
+                            await new Promise((resolve, reject) => {
+                                outStream.on('finish', resolve);
+                                outStream.on('error', reject);
+                            });
 
-                        let chunksList = [];
+                            if (fs.existsSync(tailPath) && fs.statSync(tailPath).size > 0) {
+                                const tailSize = fs.statSync(tailPath).size;
+                                uploadProgressTracker.set(uploadId, {
+                                    status: 'uploading_telegram',
+                                    percent: 0,
+                                    loaded: 0,
+                                    total: tailSize,
+                                    speed: 0,
+                                });
+
+                                let lastLoaded = 0;
+                                let lastTime = Date.now();
+
+                                const uploadRes = await telegramService.uploadFileToStorage(
+                                    tailPath,
+                                    tailFilename,
+                                    `TeleDrive File: ${filename}` + (batchIdx > 1 ? ` (Part ${batchIdx})` : ''),
+                                    (progress) => {
+                                        const loaded = Math.round(progress * tailSize);
+                                        const now = Date.now();
+                                        const percent = Math.min(99, Math.round(progress * 100));
+                                        const elapsed = (now - lastTime) / 1000;
+                                        let speed = 0;
+                                        if (elapsed > 0.3) {
+                                            speed = (loaded - lastLoaded) / elapsed;
+                                            lastLoaded = loaded;
+                                            lastTime = now;
+                                        }
+                                        uploadProgressTracker.set(uploadId, {
+                                            status: 'uploading_telegram',
+                                            percent,
+                                            loaded,
+                                            total: tailSize,
+                                            speed,
+                                        });
+                                    }
+                                );
+
+                                try { fs.unlinkSync(tailPath); } catch (e) {}
+
+                                let chunksList = [];
+                                if (fs.existsSync(chunksFile)) {
+                                    try { chunksList = JSON.parse(fs.readFileSync(chunksFile, 'utf8')); } catch (e) {}
+                                }
+
+                                chunksList.push({
+                                    part: batchIdx,
+                                    message_id: uploadRes.message_id,
+                                    file_id: uploadRes.file_id,
+                                    size: uploadRes.file_size || tailSize,
+                                });
+
+                                fs.writeFileSync(chunksFile, JSON.stringify(chunksList, null, 2), 'utf8');
+                            }
+                        }
+
+                        let finalChunks = [];
                         if (fs.existsSync(chunksFile)) {
-                            try { chunksList = JSON.parse(fs.readFileSync(chunksFile, 'utf8')); } catch (e) {}
+                            try { finalChunks = JSON.parse(fs.readFileSync(chunksFile, 'utf8')); } catch (e) {}
                         }
 
-                        chunksList.push({
-                            part: batchIdx,
-                            message_id: uploadRes.message_id,
-                            file_id: uploadRes.file_id,
-                            size: uploadRes.file_size,
+                        Helpers.removeDir(uploadSessionDir);
+
+                        if (!finalChunks || finalChunks.length === 0) {
+                            uploadProgressTracker.set(uploadId, {
+                                status: 'failed',
+                                error: 'No chunks uploaded to Telegram Storage.',
+                            });
+                            return;
+                        }
+
+                        finalChunks.sort((a, b) => (a.part || 0) - (b.part || 0));
+
+                        let totalUploadedBytes = 0;
+                        finalChunks.forEach((c, idx) => {
+                            c.part = idx + 1;
+                            totalUploadedBytes += (c.size || 0);
                         });
 
-                        fs.writeFileSync(chunksFile, JSON.stringify(chunksList, null, 2), 'utf8');
+                        uploadProgressTracker.set(uploadId, {
+                            status: 'indexing',
+                            percent: 99,
+                            loaded: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
+                            total: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
+                        });
+
+                        const newEntry = await storageEngine.createFileEntry({
+                            name: filename,
+                            size: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
+                            mime_type: Helpers.getMimeType(filename),
+                            parent_id: parentId,
+                            chunks: finalChunks,
+                        });
+
+                        uploadProgressTracker.set(uploadId, {
+                            status: 'completed',
+                            percent: 100,
+                            loaded: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
+                            total: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
+                            item: newEntry,
+                            needs_purge: Boolean(newEntry.needs_purge),
+                        });
+                        setTimeout(() => uploadProgressTracker.delete(uploadId), 60000);
+
+                        Helpers.cleanStaleUploadSessions(config.TEMP_CHUNK_DIR, 1800);
+                    } catch (bgErr) {
+                        console.error(`[CompleteUpload] Background upload failed for ${uploadId}:`, bgErr);
+                        uploadProgressTracker.set(uploadId, {
+                            status: 'failed',
+                            error: bgErr.message || 'Failed to complete upload to Telegram Storage.',
+                        });
+                        Helpers.removeDir(uploadSessionDir);
+                        setTimeout(() => uploadProgressTracker.delete(uploadId), 30000);
                     }
-                }
+                })();
 
-                let finalChunks = [];
-                if (fs.existsSync(chunksFile)) {
-                    try { finalChunks = JSON.parse(fs.readFileSync(chunksFile, 'utf8')); } catch (e) {}
-                }
-
-                Helpers.removeDir(uploadSessionDir);
-
-                if (!finalChunks || finalChunks.length === 0) {
-                    return Helpers.error(res, 'No chunks uploaded to Telegram Storage.', 400);
-                }
-
-                finalChunks.sort((a, b) => (a.part || 0) - (b.part || 0));
-
-                let totalUploadedBytes = 0;
-                finalChunks.forEach((c, idx) => {
-                    c.part = idx + 1;
-                    totalUploadedBytes += (c.size || 0);
-                });
-
-                const newEntry = await storageEngine.createFileEntry({
-                    name: filename,
-                    size: totalUploadedBytes > 0 ? totalUploadedBytes : fileSize,
-                    mime_type: Helpers.getMimeType(filename),
-                    parent_id: parentId,
-                    chunks: finalChunks,
-                });
-
-                Helpers.cleanStaleUploadSessions(config.TEMP_CHUNK_DIR, 1800);
-
-                return Helpers.success(res, {
-                    item: newEntry,
-                    needs_purge: Boolean(newEntry.needs_purge),
-                }, 'File uploaded and indexed successfully.');
+                return;
             }
 
             case 'files.cancel_upload': {
@@ -547,24 +662,91 @@ async function handleAction(action, req, res) {
                     totalSize = target.chunks.reduce((acc, c) => acc + (c.size || 0), 0);
                 }
 
+                let currentOffset = 0;
+                const chunkRanges = target.chunks.map((chunk) => {
+                    const chunkSize = chunk.size || 0;
+                    const chunkStart = currentOffset;
+                    const chunkEnd = currentOffset + chunkSize - 1;
+                    currentOffset += chunkSize;
+                    return {
+                        message_id: chunk.message_id,
+                        size: chunkSize,
+                        start: chunkStart,
+                        end: chunkEnd,
+                    };
+                });
+
+                if (totalSize === 0 && currentOffset > 0) {
+                    totalSize = currentOffset;
+                }
+
+                const rangeHeader = req.headers.range;
+                let start = 0;
+                let end = totalSize > 0 ? totalSize - 1 : 0;
+                let isRangeRequest = false;
+
+                if (rangeHeader && totalSize > 0) {
+                    const parts = rangeHeader.replace(/bytes=/, "").split("-");
+                    const partialStart = parseInt(parts[0], 10);
+                    const partialEnd = parseInt(parts[1], 10);
+
+                    if (!isNaN(partialStart)) {
+                        start = partialStart;
+                    }
+                    if (!isNaN(partialEnd)) {
+                        end = partialEnd;
+                    } else if (isNaN(partialStart) && !isNaN(partialEnd)) {
+                        start = Math.max(0, totalSize - partialEnd);
+                        end = totalSize - 1;
+                    }
+
+                    if (start >= totalSize || start < 0 || end < start) {
+                        res.setHeader('Content-Range', `bytes */${totalSize}`);
+                        return res.status(416).send('Requested Range Not Satisfiable');
+                    }
+
+                    end = Math.min(end, totalSize - 1);
+                    isRangeRequest = true;
+                }
+
+                const contentLength = (end - start) + 1;
+
                 res.setHeader('Content-Type', mimeType);
                 res.setHeader('Content-Disposition', `${disposition}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`);
                 res.setHeader('Cache-Control', 'no-transform, private, max-age=3600');
+                res.setHeader('Accept-Ranges', 'bytes');
                 res.setHeader('X-Content-Type-Options', 'nosniff');
-                if (totalSize > 0) {
-                    res.setHeader('Content-Length', totalSize);
-                }
 
-                for (const chunk of target.chunks) {
-                    if (res.writableEnded || res.destroyed) break;
-                    if (chunk.message_id) {
-                        await telegramService.streamMediaToResponse(
-                            config.STORAGE_CHANNEL_ID,
-                            chunk.message_id,
-                            res
-                        );
+                if (isRangeRequest) {
+                    res.status(206);
+                    res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+                    res.setHeader('Content-Length', contentLength);
+                } else {
+                    res.status(200);
+                    if (totalSize > 0) {
+                        res.setHeader('Content-Length', totalSize);
                     }
                 }
+
+                res.flushHeaders();
+
+                const activeChunks = chunkRanges.filter(c => c.end >= start && c.start <= end);
+                const chunksToStream = activeChunks.map(c => {
+                    const rangeStartInChunk = Math.max(0, start - c.start);
+                    const rangeEndInChunk = Math.min(c.size - 1, end - c.start);
+                    return {
+                        message_id: c.message_id,
+                        start: rangeStartInChunk,
+                        end: rangeEndInChunk,
+                        size: c.size,
+                    };
+                });
+
+                await telegramService.streamChunksToResponse(
+                    config.STORAGE_CHANNEL_ID,
+                    chunksToStream,
+                    res
+                );
                 return res.end();
             }
 

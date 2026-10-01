@@ -201,8 +201,8 @@ if (require.main === module) {
     });
 
     server.timeout = 0;
-    server.keepAliveTimeout = 650000;
-    server.headersTimeout = 660000;
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
 }
 
 module.exports = app;
