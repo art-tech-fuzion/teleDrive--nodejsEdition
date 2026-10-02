@@ -402,6 +402,13 @@ TeleDrive provides a RESTful API and unified action router (`/api` and backward-
 1. **Keep Channels Private**: Never set your Storage or Index Channel to public. Private channels ensure data is accessible only by your authenticated server instance.
 2. **Protect Your `.env`**: Never commit your `.env` file or `STRING_SESSION` to GitHub or public repositories.
 3. **Dedicated API Keys**: Always create and use your own `API_ID` and `API_HASH` from `my.telegram.org` to ensure proper authorization.
+4. **Prevent Session Revocation (`AUTH_KEY_DUPLICATED`)**:
+   - **Why it happens**: If you run your local development server (`npm run dev`) and live production server simultaneously using the **exact same `STRING_SESSION`**, Telegram detects concurrent socket connections from multiple IP addresses/clients. To protect your account, Telegram automatically invalidates and revokes the active session key, throwing the error: `Concurrent usage of the current session from multiple connections was detected, the current session was invalidated by the server for security reasons!`.
+   - **How to resolve if revoked**:
+     1. Run `npm run generate-session` in your terminal to authenticate with your phone number and generate a fresh `STRING_SESSION`.
+     2. Paste the newly generated `STRING_SESSION` into your production `.env` file.
+     3. Restart your Node.js application server (`npm start` or restart in hosting control panel).
+     4. Ensure you use separate `STRING_SESSION` keys for local development and live production environments.
 
 ---
 

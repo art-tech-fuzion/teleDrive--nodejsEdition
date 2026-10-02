@@ -6,13 +6,13 @@
  */
 
 const express = require('express');
-const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
 const config = require('./src/config');
+const AuthService = require('./src/services/auth');
 const apiRoutes = require('./src/routes/api');
 const viewRoutes = require('./src/routes/views');
 const telegramService = require('./src/services/telegram');
@@ -62,88 +62,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
-
-// File-based persistent session store for multi-process / server restarts
-class DiskSessionStore extends session.Store {
-    constructor() {
-        super();
-        this.dir = process.env.SESSION_DIR 
-            ? path.resolve(process.env.SESSION_DIR)
-            : path.join(__dirname, 'temp_chunks', '.sessions');
-        this._ensureDir();
-    }
-    _ensureDir() {
-        try {
-            if (!fs.existsSync(this.dir)) {
-                fs.mkdirSync(this.dir, { recursive: true });
-            }
-        } catch (e) {
-            console.error('⚠️ Could not create session directory:', e.message);
-        }
-    }
-    _getFilePath(sid) {
-        if (!sid) return null;
-        // Strictly sanitize sid to prevent directory traversal
-        const safeSid = String(sid).replace(/[^a-zA-Z0-9_\-]/g, '');
-        if (!safeSid) return null;
-        return path.join(this.dir, `${safeSid}.json`);
-    }
-    get(sid, cb) {
-        this._ensureDir();
-        const filePath = this._getFilePath(sid);
-        if (!filePath || !fs.existsSync(filePath)) return cb(null, null);
-        try {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            if (data.cookie && data.cookie.expires && new Date(data.cookie.expires) < new Date()) {
-                try { fs.unlinkSync(filePath); } catch (e) {}
-                return cb(null, null);
-            }
-            return cb(null, data);
-        } catch (e) {
-            return cb(null, null);
-        }
-    }
-    set(sid, sess, cb) {
-        this._ensureDir();
-        const filePath = this._getFilePath(sid);
-        if (!filePath) return cb && cb(new Error('Invalid session ID'));
-        try {
-            fs.writeFileSync(filePath, JSON.stringify(sess), 'utf8');
-            return cb && cb(null);
-        } catch (e) {
-            return cb && cb(e);
-        }
-    }
-    destroy(sid, cb) {
-        this._ensureDir();
-        const filePath = this._getFilePath(sid);
-        if (!filePath) return cb && cb(null);
-        try {
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-            return cb && cb(null);
-        } catch (e) {
-            return cb && cb(null);
-        }
-    }
-    touch(sid, sess, cb) {
-        return this.set(sid, sess, cb);
-    }
-}
-
-app.use(session({
-    store: new DiskSessionStore(),
-    name: 'TELEDRIVE_SESSID',
-    secret: config.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        httpOnly: true,
-        // Secure dynamically based on environment or explicit flag; supports reverse-proxy HTTPS via trust proxy
-        secure: process.env.COOKIE_SECURE === 'true' ? true : (process.env.COOKIE_SECURE === 'false' ? false : (process.env.NODE_ENV === 'production' ? true : 'auto')),
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    }
-}));
+app.use(AuthService.attachUserMiddleware);
 
 // -----------------------------------------------------------------------------
 // 3. Static Assets

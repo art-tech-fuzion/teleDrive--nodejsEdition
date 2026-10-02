@@ -14,7 +14,7 @@ const LOGIN_TEMPLATE_PATH = path.resolve(__dirname, '../../templates/backend/log
 
 // Login page
 router.get('/login', (req, res) => {
-    if (req.session && req.session.user) {
+    if (req.userSession && req.userSession.u) {
         return res.redirect('/');
     }
     if (!fs.existsSync(LOGIN_TEMPLATE_PATH)) {
@@ -59,7 +59,7 @@ router.get('/', AuthService.requireAuth, (req, res) => {
     try {
         let html = fs.readFileSync(APP_TEMPLATE_PATH, 'utf8');
         const csrfToken = AuthService.getCsrfToken(req);
-        const username = req.session.user || 'Admin';
+        const username = (req.userSession && req.userSession.u) || 'Admin';
 
         // Dynamic file-modified timestamp or centralized version for cache-busting
         const config = require('../config');

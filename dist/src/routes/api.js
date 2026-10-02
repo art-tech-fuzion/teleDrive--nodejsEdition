@@ -79,7 +79,7 @@ async function handleAction(action, req, res) {
         );
       }
 
-      if (action === "auth.logout" && (!req.session || !req.session.user)) {
+      if (action === "auth.logout" && (!req.userSession || !req.userSession.u)) {
         res.clearCookie("TELEDRIVE_SESSID");
         return Helpers.success(res, {}, "Logged out successfully.");
       }
@@ -117,13 +117,25 @@ async function handleAction(action, req, res) {
         }
 
         if (result.success) {
-          req.session.user = username;
-          const csrfToken = AuthService.getCsrfToken(req);
+          const sessionData = AuthService.createToken(username);
+          res.cookie("TELEDRIVE_SESSID", sessionData.token, {
+            httpOnly: true,
+            secure:
+              process.env.COOKIE_SECURE === "true"
+                ? true
+                : process.env.COOKIE_SECURE === "false"
+                ? false
+                : process.env.NODE_ENV === "production"
+                ? true
+                : "auto",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+          });
           return Helpers.success(
             res,
             {
               username,
-              csrf_token: csrfToken,
+              csrf_token: sessionData.csrfToken,
             },
             "Login successful.",
           );
@@ -133,30 +145,22 @@ async function handleAction(action, req, res) {
       }
 
       case "auth.logout": {
-        if (req.session) {
-          req.session.destroy(() => {
-            res.clearCookie("TELEDRIVE_SESSID");
-            return Helpers.success(res, {}, "Logged out successfully.");
-          });
-        } else {
-          res.clearCookie("TELEDRIVE_SESSID");
-          return Helpers.success(res, {}, "Logged out successfully.");
-        }
-        return;
+        res.clearCookie("TELEDRIVE_SESSID");
+        return Helpers.success(res, {}, "Logged out successfully.");
       }
 
       case "auth.status": {
-        const authenticated = Boolean(req.session && req.session.user);
+        const authenticated = Boolean(req.userSession && req.userSession.u);
         const payload = { authenticated };
         if (authenticated) {
-          payload.user = req.session.user;
+          payload.user = req.userSession.u;
           payload.csrf_token = AuthService.getCsrfToken(req);
         }
         return Helpers.success(res, payload);
       }
 
       case "system.status": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         return Helpers.success(res, {
           configured: storageEngine.isConfigured(),
           mtproto_connected: telegramService.isConnected,
@@ -171,7 +175,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.list": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const parentId = req.query.parent_id || "root";
         const search = (req.query.search || "").trim().toLowerCase();
         const forceRefresh = Boolean(
@@ -207,7 +211,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.direct_upload": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const file = req.file;
         if (!file) {
           return Helpers.error(res, "No file received for direct upload.", 400);
@@ -324,7 +328,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.upload_progress": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const uploadId = (
           req.query.upload_id ||
           req.body.upload_id ||
@@ -340,7 +344,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.upload_chunk": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
 
         const uploadId = (req.body.upload_id || "").replace(/[^\w\-]/g, "");
         const chunkIndex = parseInt(req.body.chunk_index || "0", 10);
@@ -469,7 +473,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.complete_upload": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
 
         const uploadId = (req.body.upload_id || "").replace(/[^\w\-]/g, "");
         const filename = Helpers.sanitizeFilename(req.body.filename || "file");
@@ -720,7 +724,7 @@ async function handleAction(action, req, res) {
       }
 
       case "files.cancel_upload": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const uploadId = (req.body.upload_id || "").replace(/[^\w\-]/g, "");
 
         if (uploadId) {
@@ -752,7 +756,7 @@ async function handleAction(action, req, res) {
       case "files.download":
       case "files.preview":
       case "files.stream_preview": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
 
         const id = req.query.id || req.params.id || "";
         const index = await storageEngine.getFileSystemIndex();
@@ -876,7 +880,7 @@ async function handleAction(action, req, res) {
       }
 
       case "folder.create": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const name = (req.body.name || "").trim();
         const parentId = req.body.parent_id || "root";
 
@@ -896,7 +900,7 @@ async function handleAction(action, req, res) {
       }
 
       case "items.rename": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const id = req.body.id || "";
         const newName = (req.body.name || "").trim();
 
@@ -913,7 +917,7 @@ async function handleAction(action, req, res) {
       }
 
       case "items.move": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const id = req.body.id || "";
         const destParentId = req.body.parent_id || "root";
 
@@ -930,7 +934,7 @@ async function handleAction(action, req, res) {
       }
 
       case "folders.list": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const index = await storageEngine.getFileSystemIndex();
         const folders = Object.values(index.items || {}).filter(
           (it) => it.type === "folder",
@@ -939,7 +943,7 @@ async function handleAction(action, req, res) {
       }
 
       case "items.delete": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const id = req.body.id || "";
 
         if (!id) {
@@ -951,7 +955,7 @@ async function handleAction(action, req, res) {
       }
 
       case "items.bulk_delete": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         let rawIds = req.body.ids;
 
         if (typeof rawIds === "string") {
@@ -980,7 +984,7 @@ async function handleAction(action, req, res) {
       }
 
       case "system.purge_index_messages": {
-        if (!req.session?.user) return Helpers.error(res, "Unauthorized.", 401);
+        if (!req.user) return Helpers.error(res, "Unauthorized.", 401);
         const result = await storageEngine.purgePendingIndexMessages();
         return Helpers.success(
           res,

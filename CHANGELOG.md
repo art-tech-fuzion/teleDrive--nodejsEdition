@@ -4,6 +4,23 @@ All notable changes to the TeleDrive project will be documented in this file.
 
 ---
 
+## [4.2.0] - 2026-10-02
+
+### 🔑 Migration to Stateless HMAC-Signed Cookie Authentication (Zero Server-Disk Storage)
+1. **Stateless HMAC-Signed Token Architecture (`src/services/auth.js`)**:
+   - Replaced legacy disk-file `express-session` (`DiskSessionStore`) with crypto-signed, stateless JWT/HMAC HttpOnly cookies.
+   - Eliminates server disk read/write operations for web authentication, eliminating session file pile-up (`.sessions` folders) and server-side disk I/O overhead.
+   - Built-in constant-time signature verification (`crypto.timingSafeEqual`) and 7-day expiration validation.
+
+2. **Clean Hosting Compatibility & Serverless Readiness**:
+   - 100% immune to Hostinger build purges, version rotations, cPanel container recycling, and server restarts.
+   - Removed `express-session` dependency from `package.json`.
+
+3. **Codebase & Utility Cleanup**:
+   - Removed all server-side session directory creation logic from `server.js`, `build-dist.js`, and `.env.example`.
+
+---
+
 ## [4.1.2] - 2026-10-02
 
 ### 🔐 Configurable Persistent Session Directory & Resilient Store
