@@ -4,6 +4,20 @@ All notable changes to the TeleDrive project will be documented in this file.
 
 ---
 
+## [4.1.2] - 2026-10-02
+
+### 🔐 Configurable Persistent Session Directory & Resilient Store
+1. **Configurable Session Directory (`SESSION_DIR`)**:
+   - Added support for `SESSION_DIR` environment variable in `DiskSessionStore` constructor (`server.js`).
+   - Allows configuring a persistent directory outside versioned deployment build folders on Hostinger, cPanel, or Linux hosting providers to prevent user session loss during server auto-purges or redeployments.
+   - Added `.env.example` documentation for setting persistent session paths (`SESSION_DIR`).
+
+2. **Self-Healing Session Directory Verification (`_ensureDir()`)**:
+   - Added automated directory verification (`this._ensureDir()`) across all `DiskSessionStore` operations (`get`, `set`, `destroy`, `touch`).
+   - Prevents `ENOENT: no such file or directory` exceptions on fresh deployments or uninitialized storage directories.
+
+---
+
 ## [4.1.1] - 2026-10-02
 
 ### 🧹 Automated Temp Chunk Cleaner & Server Path Masking

@@ -51,9 +51,18 @@ app.use(cookieParser());
 class DiskSessionStore extends session.Store {
     constructor() {
         super();
-        this.dir = path.join(__dirname, 'temp_chunks', '.sessions');
-        if (!fs.existsSync(this.dir)) {
-            fs.mkdirSync(this.dir, { recursive: true });
+        this.dir = process.env.SESSION_DIR
+            ? path.resolve(process.env.SESSION_DIR)
+            : path.join(__dirname, 'temp_chunks', '.sessions');
+        this._ensureDir();
+    }
+    _ensureDir() {
+        try {
+            if (!fs.existsSync(this.dir)) {
+                fs.mkdirSync(this.dir, { recursive: true });
+            }
+        } catch (e) {
+            console.error('⚠️ Could not create session directory:', e.message);
         }
     }
     _getFilePath(sid) {
@@ -64,6 +73,7 @@ class DiskSessionStore extends session.Store {
         return path.join(this.dir, `${safeSid}.json`);
     }
     get(sid, cb) {
+        this._ensureDir();
         const filePath = this._getFilePath(sid);
         if (!filePath || !fs.existsSync(filePath)) return cb(null, null);
         try {
@@ -78,6 +88,7 @@ class DiskSessionStore extends session.Store {
         }
     }
     set(sid, sess, cb) {
+        this._ensureDir();
         const filePath = this._getFilePath(sid);
         if (!filePath) return cb && cb(new Error('Invalid session ID'));
         try {
@@ -88,6 +99,7 @@ class DiskSessionStore extends session.Store {
         }
     }
     destroy(sid, cb) {
+        this._ensureDir();
         const filePath = this._getFilePath(sid);
         if (!filePath) return cb && cb(null);
         try {

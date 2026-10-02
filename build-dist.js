@@ -305,6 +305,7 @@ function build() {
 
     // 3. Place security index.php ("Silence is golden") in every subfolder of dist
     const silenceContent = '<?php\n// Silence is golden.\n';
+
     for (const dir of createdDirs) {
         const indexPath = path.join(dir, 'index.php');
         if (!fs.existsSync(indexPath)) {
